@@ -1,4 +1,9 @@
-# OpenChannel NVM Express SSD Controller
+PLEASE, REFER TO THE WIKI FOR FULL DOCUMENTATION:
+```
+https://github.com/DFC-OpenSource/ox-ctrl/wiki
+```
+
+# OX: Open-Channel SSD Controller
 
 OX is a controller solution for programmable devices like the dragon Fire Card. OX exposes the
 device as a LightNVM compatible Open-Channel SSD. OX has been developed to work
