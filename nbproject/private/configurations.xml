@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configurationDescriptor version="97">
+  <logicalFolder name="root" displayName="root" projectFiles="true" kind="ROOT">
+    <df root="." name="0">
+      <df name="bin">
+        <df name="dfc_fpga_3_01_00">
+        </df>
+      </df>
+      <df name="ftl">
+        <df name="lnvm">
+          <in>ftl_lnvm.c</in>
+          <in>ftl_lnvm.h</in>
+        </df>
+      </df>
+      <df name="include">
+        <in>lightnvm.h</in>
+        <in>nvme.h</in>
+        <in>ssd.h</in>
+        <in>tests.h</in>
+        <in>uatomic.h</in>
+      </df>
+      <df name="mmgr">
+        <df name="dfc_nand">
+          <df name="fpga_2_05_04">
+            <in>nand_dma.c</in>
+            <in>nand_dma.h</in>
+          </df>
+          <df name="fpga_3_01_00">
+            <in>nand_dma.c</in>
+            <in>nand_dma.h</in>
+          </df>
+          <in>dfc_nand.c</in>
+          <in>dfc_nand.h</in>
+          <in>nand_dma.c</in>
+          <in>nand_dma.h</in>
+        </df>
+      </df>
+      <df name="pcie_dfc">
+        <in>pcie_dfc.c</in>
+        <in>pcie_dfc.h</in>
+      </df>
+      <df name="test">
+        <in>test_admin.c</in>
+        <in>test_core.c</in>
+        <in>test_lightnvm.c</in>
+        <in>test_mmgr.c</in>
+      </df>
+      <in>cmd_args.c</in>
+      <in>core.c</in>
+      <in>lightnvm.c</in>
+      <in>nvme.c</in>
+      <in>nvme_cmd.c</in>
+    </df>
+  </logicalFolder>
+  <projectmakefile>Makefile</projectmakefile>
+  <confs>
+    <conf name="Default" type="0">
+      <toolsSet>
+        <developmentServer>localhost</developmentServer>
+        <platform>2</platform>
+      </toolsSet>
+      <compile>
+        <compiledirpicklist>
+          <compiledirpicklistitem>.</compiledirpicklistitem>
+          <compiledirpicklistitem>${AUTO_FOLDER}</compiledirpicklistitem>
+        </compiledirpicklist>
+        <compiledir>${AUTO_FOLDER}</compiledir>
+        <compilecommandpicklist>
+          <compilecommandpicklistitem>${MAKE} ${ITEM_NAME}.o</compilecommandpicklistitem>
+          <compilecommandpicklistitem>${AUTO_COMPILE}</compilecommandpicklistitem>
+        </compilecommandpicklist>
+        <compilecommand>${AUTO_COMPILE}</compilecommand>
+      </compile>
+      <dbx_gdbdebugger version="1">
+        <gdb_pathmaps>
+        </gdb_pathmaps>
+        <gdb_interceptlist>
+          <gdbinterceptoptions gdb_all="false" gdb_unhandled="true" gdb_unexpected="true"/>
+        </gdb_interceptlist>
+        <gdb_options>
+          <DebugOptions>
+          </DebugOptions>
+        </gdb_options>
+        <gdb_buildfirst gdb_buildfirst_overriden="false" gdb_buildfirst_old="false"/>
+      </dbx_gdbdebugger>
+      <nativedebugger version="1">
+        <engine>gdb</engine>
+      </nativedebugger>
+      <runprofile version="9">
+        <runcommandpicklist>
+          <runcommandpicklistitem>"${OUTPUT_PATH}"</runcommandpicklistitem>
+        </runcommandpicklist>
+        <runcommand>"${OUTPUT_PATH}"</runcommand>
+        <rundir>.</rundir>
+        <buildfirst>false</buildfirst>
+        <terminal-type>0</terminal-type>
+        <remove-instrumentation>0</remove-instrumentation>
+        <environment>
+        </environment>
+      </runprofile>
+    </conf>
+  </confs>
+</configurationDescriptor>
