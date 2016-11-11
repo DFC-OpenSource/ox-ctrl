@@ -8,8 +8,8 @@
 #define LNVM_SEC_OOBSZ      0x100
 #define LNVM_SEC_PG         4
 #define LNVM_PG_BLK         512
-#define LNVM_CH             1
-#define LNVM_LUN_CH         32
+#define LNVM_CH             8
+#define LNVM_LUN_CH         4
 #define LNVM_PLANES         2
 #define LNVM_PG_SIZE        (LNVM_SECSZ * LNVM_SEC_PG)
 #define LNVM_PL_PG_SIZE     (LNVM_SECSZ * LNVM_SEC_PG * LNVM_PLANES)

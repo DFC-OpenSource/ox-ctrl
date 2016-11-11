@@ -258,28 +258,13 @@ void nvm_complete_io (struct nvm_io_cmd *cmd)
         core.tests_init->complete_io(req) : nvme_rw_cb(req);
 }
 
-/* For now, we work with all LUNs within 1 channel, it means all
-   channels must have the same number of LUNs and be managed by lnvm_ftl */
-static void nvm_lnvm_chlun_addr (struct nvm_ppa_addr *ppa)
-{
-    uint8_t lpc;
-    uint64_t ch_id, lun_id;
-
-    lpc = (LNVM_LUN_CH / core.nvm_ch_count) & (0xff);
-    ch_id = (ppa->g.lun & 0xff) / lpc;
-    lun_id = (ppa->g.lun & 0xff) % lpc;
-
-    ppa->g.ch = ch_id;
-    ppa->g.lun = lun_id;
-}
-
 int nvm_submit_io (struct nvm_io_cmd *io)
 {
     struct nvm_channel *ch;
     int ret, retry, i, qid;
     uint64_t cmd_addr = 0;
     NvmeRequest *req = (NvmeRequest *) io->req;
-    struct nvm_ppa_addr aux_ppa;
+    uint8_t aux_ch;
 
     io->status.nvme_status = NVME_SUCCESS;
 
@@ -303,21 +288,27 @@ int nvm_submit_io (struct nvm_io_cmd *io)
     }
 
 #if LIGHTNVM
-    aux_ppa.g.lun = io->ppalist[0].g.lun;
-    nvm_lnvm_chlun_addr (&aux_ppa);
+    /* For now, the host ppa channel must be aligned with core.nvm_ch[] */
+    /* All ppas within the vector must address to the same channel */
+    aux_ch = io->ppalist[0].g.ch;
 
-    if (aux_ppa.g.ch >= core.nvm_ch_count) {
+    if (aux_ch >= core.nvm_ch_count) {
         syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
         req->status = NVME_INTERNAL_DEV_ERROR;
         nvm_complete_io(io);
         return NVME_INTERNAL_DEV_ERROR;
     }
 
-    ch = core.nvm_ch[aux_ppa.g.ch];
-    for (i = 0; i < io->n_sec; i++) {
-        io->ppalist[i].g.ch = ch->ch_mmgr_id;
-        io->ppalist[i].g.lun = aux_ppa.g.lun;
+    for (i = 1; i < io->n_sec; i++) {
+        if (io->ppalist[i].g.ch != aux_ch) {
+            syslog(LOG_INFO,"[nvm ERROR: IO failed, ch does not match.]\n");
+            req->status = NVME_INVALID_FIELD;
+            nvm_complete_io(io);
+            return NVME_INVALID_FIELD;
+        }
     }
+
+    ch = core.nvm_ch[aux_ch];
 #else
     /* For now all channels must be included in the global namespace */
     for (i = 0; i < nvm_ch_count; i++) {
@@ -344,7 +335,7 @@ int nvm_submit_io (struct nvm_io_cmd *io)
     	if (ret < 0)
             retry--;
         else if (core.debug)
-            printf(" CMD cid: %d, type: 0x%x submitted to FTL. \n  Channel: "
+            printf(" CMD cid: %lu, type: 0x%x submitted to FTL. \n  Channel: "
                     "%d, FTL queue %d\n", io->cid, io->cmdtype, ch->ch_id, qid);
 
     } while (ret < 0 && retry);
@@ -724,7 +715,6 @@ static int nvm_ftl_cap_set_bbtbl (struct nvm_ppa_addr *ppa,
 int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
 {
     struct nvm_ppa_addr *ppa;
-    struct nvm_ppa_addr aux_ppa;
     struct nvm_channel *ch;
     int i;
 
@@ -737,9 +727,7 @@ int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
     }
 
     ppa = arg[0];
-    aux_ppa.g.lun = ppa->g.lun;
-    nvm_lnvm_chlun_addr (&aux_ppa);
-    ch = core.nvm_ch[aux_ppa.g.ch];
+    ch = core.nvm_ch[ppa->g.ch];
     if (nvm_memcheck(ch))
         goto OUT;
 
@@ -749,7 +737,7 @@ int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
             if (narg < 4 || nvm_memcheck(ch->ftl->ops->get_bbtbl))
                 goto OUT;
             if (ch->ftl->cap & 1 << FTL_CAP_GET_BBTBL) {
-                if (nvm_ftl_cap_get_bbtbl(&aux_ppa, ch, arg)) goto OUT;
+                if (nvm_ftl_cap_get_bbtbl(ppa, ch, arg)) goto OUT;
                 return 0;
             }
             break;
@@ -759,7 +747,7 @@ int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
             if (narg < 3 || nvm_memcheck(ch->ftl->ops->set_bbtbl))
                 goto OUT;
             if (ch->ftl->cap & 1 << FTL_CAP_SET_BBTBL) {
-                if (nvm_ftl_cap_set_bbtbl(&aux_ppa, ch, arg)) goto OUT;
+                if (nvm_ftl_cap_set_bbtbl(ppa, ch, arg)) goto OUT;
                 return 0;
             }
             break;

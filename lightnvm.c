@@ -424,7 +424,6 @@ int lnvm_init(NvmeCtrl *n)
     for (i = 0; i < n->num_namespaces; i++) {
         ns = &n->namespaces[i];
 
-        /* For now we export 1 channel containing all LUNs */
         for (cid = 0; cid < core.nvm_ch_count; cid++){
             tot_blks += core.nvm_ch[cid]->geometry->blk_per_lun *
                             (core.nvm_ch[cid]->geometry->lun_per_ch & 0xffff);
