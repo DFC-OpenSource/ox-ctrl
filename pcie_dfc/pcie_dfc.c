@@ -153,7 +153,7 @@ CLEAN_EXIT:
     return;
 }
 
-void pcie_munmap_host_mem (struct pci_ctrl *pci)
+static void pcie_munmap_host_mem (struct pci_ctrl *pci)
 {
 	if (pci->io_mem.addr) {
 		munmap ((void *)pci->io_mem.addr, pci->io_mem.size);
@@ -165,7 +165,7 @@ void pcie_munmap_host_mem (struct pci_ctrl *pci)
 	memset (pci, 0, sizeof (struct pci_ctrl));
 }
 
-int pcie_mmap_host_mem (struct pci_ctrl *pci)
+static int pcie_mmap_host_mem (struct pci_ctrl *pci)
 {
     int fd_host_mem = 0;
 
@@ -328,7 +328,7 @@ struct nvm_pcie pcie_dfc = {
     .name           = "PCI_LS2085",
 };
 
-void dfcpcie_isr_notify (void *opaque)
+static void dfcpcie_isr_notify (void *opaque)
 {
     NvmeCQ *cq = opaque;
     struct pci_ctrl *pci = (struct pci_ctrl *) pcie_dfc.ctrl;
@@ -355,7 +355,7 @@ static uint32_t *dfcpcie_get_iodbst_reg (void)
     return ((struct pci_ctrl *)pcie_dfc.ctrl)->iosqdb_bits;
 }
 
-void dfcpcie_exit() {
+static void dfcpcie_exit() {
     struct pci_ctrl *pcie = (struct pci_ctrl *) pcie_dfc.ctrl;
     reset_iosqdb_bits(pcie);
     reset_nvmeregs(pcie);

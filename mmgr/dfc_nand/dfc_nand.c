@@ -123,7 +123,7 @@ static int dfcnand_dma_helper (io_cmd *cmd)
     return ret;
 }
 
-int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
+static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
     io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
     int c;
@@ -176,7 +176,7 @@ CLEAN:
     return -1;
 }
 
-int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
+static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
     int c;
     io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
@@ -230,7 +230,7 @@ CLEAN:
     return -1;
 }
 
-int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
+static int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
     io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
@@ -255,7 +255,7 @@ CLEAN:
     return -1;
 }
 
-void dfcnand_exit (struct nvm_mmgr *mmgr)
+static void dfcnand_exit (struct nvm_mmgr *mmgr)
 {
     int i;
     nand_dm_deinit();
@@ -296,7 +296,7 @@ static int dfcnand_io_rsv_blk (struct nvm_channel *ch, uint8_t cmdtype,
     return ret;
 }
 
-int dfcnand_read_nvminfo (struct nvm_channel *ch)
+static int dfcnand_read_nvminfo (struct nvm_channel *ch)
 {
     int ret, pg, i;
     struct nvm_channel ch_a;
@@ -385,7 +385,7 @@ OUT:
     return ret;
 }
 
-int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
+static int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
     int i;
 
@@ -397,7 +397,7 @@ int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
     return 0;
 }
 
-int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
+static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
     int i, n, nsp = 0;
 

@@ -69,6 +69,8 @@ int nvm_register_pcie_handler (struct nvm_pcie *pcie)
     core.nvm_pcie = pcie;
 
     log_info("  [nvm: PCI Handler registered: %s]\n", pcie->name);
+
+    return 0;
 }
 
 int nvm_register_mmgr (struct nvm_mmgr *mmgr)
@@ -140,6 +142,8 @@ void *nvm_ftl_io_thread (void *arg)
     } while (ftl->active);
 
     log_info("  [ftl: IO thread (%s)(%d) killed.]\n", ftl->name, q_id);
+
+    return NULL;
 }
 
 static int nvm_create_ftl_queue (struct nvm_ftl *ftl, uint8_t index)
@@ -559,6 +563,8 @@ void *nvm_sub_pl_sio_th (void *arg)
 {
     struct nvm_sync_io_arg *ptr = (struct nvm_sync_io_arg *) arg;
     ptr->status = nvm_submit_sync_io(ptr->ch, ptr->cmd, ptr->buf, ptr->cmdtype);
+
+    return NULL;
 }
 
 /**
@@ -679,6 +685,8 @@ static int nvm_ch_config ()
             c++;
         }
     }
+
+    return 0;
 }
 
 static int nvm_ftl_cap_get_bbtbl (struct nvm_ppa_addr *ppa,
@@ -923,7 +931,7 @@ static void nvm_print_log ()
                                   core.nvm_nvme_ctrl->ns_size[0] / NVM_PG_SIZE);
 }
 
-void nvm_jump (int signal) {
+static void nvm_jump (int signal) {
     longjmp (core.jump, 1);
 }
 

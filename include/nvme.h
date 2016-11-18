@@ -996,9 +996,23 @@ typedef struct NvmeCtrl {
 #endif /* LIGHTNVM */
 } NvmeCtrl;
 
-void nvme_exit(void);
-uint8_t nvme_write_to_host(void *, uint64_t, ssize_t);
-uint8_t nvme_read_from_host(void *, uint64_t, ssize_t);
+void     nvme_exit(void);
+uint8_t  nvme_write_to_host(void *, uint64_t, ssize_t);
+uint8_t  nvme_read_from_host(void *, uint64_t, ssize_t);
+uint16_t nvme_init_cq (NvmeCQ *, NvmeCtrl *, uint64_t, uint16_t, uint16_t,
+        uint16_t, uint16_t, int);
+uint16_t nvme_init_sq (NvmeSQ *, NvmeCtrl *, uint64_t, uint16_t, uint16_t,
+        uint16_t, enum NvmeQFlags, int);
+void     nvme_enqueue_req_completion (NvmeCQ *, NvmeRequest *);
+void     nvme_post_cqes (void *);
+int      nvme_check_cqid (NvmeCtrl *, uint16_t);
+int      nvme_check_sqid (NvmeCtrl *, uint16_t);
+void     nvme_free_sq (NvmeSQ *, NvmeCtrl *);
+void     nvme_free_cq (NvmeCQ *, NvmeCtrl *);
+void     nvme_addr_read (NvmeCtrl *, uint64_t, void *, int);
+void     nvme_addr_write (NvmeCtrl *, uint64_t, void *, int);
+void     nvme_enqueue_event (NvmeCtrl *, uint8_t, uint8_t, uint8_t);
+void     nvme_rw_cb (void *);
 
 /* NVMe Admin cmd */
 uint16_t nvme_identify (NvmeCtrl *, NvmeCmd *);
@@ -1011,6 +1025,7 @@ uint16_t nvme_get_feature (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 uint16_t nvme_get_log(NvmeCtrl *, NvmeCmd *);
 uint16_t nvme_async_req (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 uint16_t nvme_format (NvmeCtrl *, NvmeCmd *);
+uint16_t nvme_abort_req (NvmeCtrl *, NvmeCmd *, uint32_t *);
 
 /* NVMe IO cmd */
 uint16_t nvme_write_uncor(NvmeCtrl *,NvmeNamespace *,NvmeCmd *,NvmeRequest *);
@@ -1022,16 +1037,17 @@ uint16_t nvme_rw (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
 
 #if LIGHTNVM
 /* LNVM functions */
-int lnvm_init(NvmeCtrl *);
+int     lnvm_init(NvmeCtrl *);
 uint8_t lnvm_dev(NvmeCtrl *);
-void lnvm_set_default(LnvmCtrl *);
-void lightnvm_exit(NvmeCtrl *);
-void lnvm_init_id_ctrl(LnvmIdCtrl *);
+void    lnvm_set_default(LnvmCtrl *);
+void    lightnvm_exit(NvmeCtrl *);
+void    lnvm_init_id_ctrl(LnvmIdCtrl *);
 
 /* LNVM Admin cmd */
 uint16_t lnvm_identity(NvmeCtrl *, NvmeCmd *);
 uint16_t lnvm_get_l2p_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 uint16_t lnvm_get_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+uint16_t lnvm_set_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 
 /* LNVM IO cmd */
 uint16_t lnvm_erase_sync(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);

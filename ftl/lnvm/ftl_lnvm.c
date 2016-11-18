@@ -43,9 +43,8 @@ static void lnvm_set_pgmap(uint8_t *pgmap, uint8_t index)
 
 static int lnvm_check_pgmap_complete (uint8_t *pgmap) {
     int sum, i;
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < 8; i++)
         sum += pgmap[i] ^ 0xff;
-    }
 
     return sum;
 }
@@ -96,7 +95,7 @@ static void lnvm_check_end_io (struct nvm_io_cmd *cmd)
 /* TODO: For now, we assume all the pages will be back from MMGR,
  * we dont define a timeout to finish the IO.
  */
-void lnvm_callback_io (struct nvm_mmgr_io_cmd *cmd)
+static void lnvm_callback_io (struct nvm_mmgr_io_cmd *cmd)
 {
     if (cmd->status == NVM_IO_SUCCESS) {
         lnvm_set_pgmap(cmd->nvm_io->status.pg_map, cmd->pg_index);
@@ -172,13 +171,11 @@ static int lnvm_check_io (struct nvm_io_cmd *cmd)
 {
     int i;
 
-    if (cmd->sec_offset && (cmd->cmdtype != MMGR_ERASE_BLK)) {
-        cmd->status.total_pgs == (cmd->n_sec / LNVM_SEC_PG) + 1;
-    }
+    if (cmd->sec_offset && (cmd->cmdtype != MMGR_ERASE_BLK))
+        cmd->status.total_pgs = (cmd->n_sec / LNVM_SEC_PG) + 1;
 
-    for (i = 64; i > cmd->status.total_pgs; i--){
+    for (i = 64; i > cmd->status.total_pgs; i--)
         lnvm_set_pgmap(cmd->status.pg_map, i-1);
-    }
 
     cmd->status.pgs_p = cmd->status.pgs_s;
 
@@ -198,7 +195,7 @@ static int lnvm_check_io (struct nvm_io_cmd *cmd)
     return 0;
 }
 
-int lnvm_submit_io (struct nvm_io_cmd *cmd)
+static int lnvm_submit_io (struct nvm_io_cmd *cmd)
 {
     int ret, i;
     ret = lnvm_check_io(cmd);
@@ -237,7 +234,7 @@ int lnvm_submit_io (struct nvm_io_cmd *cmd)
     return 0;
 }
 
-int lnvm_init_channel (struct nvm_channel *ch)
+static int lnvm_init_channel (struct nvm_channel *ch)
 {
     /* Blks 2 and 3 (block 1 for dual-plane) in the lun 0 belong to lnvm */
     ch->ftl_rsv = 2;
@@ -255,7 +252,8 @@ int lnvm_init_channel (struct nvm_channel *ch)
     return 0;
 }
 
-int lnvm_ftl_get_bbtbl (struct nvm_ppa_addr *ppa, uint8_t *bbtbl, uint32_t nb)
+static int lnvm_ftl_get_bbtbl (struct nvm_ppa_addr *ppa, uint8_t *bbtbl,
+                                                                    uint32_t nb)
 {
     int j;
     struct nvm_channel *ch = lnvm_get_ch_instance(ppa->g.ch);
@@ -285,12 +283,12 @@ int lnvm_ftl_get_bbtbl (struct nvm_ppa_addr *ppa, uint8_t *bbtbl, uint32_t nb)
     return 0;
 }
 
-int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint32_t nb)
+static int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint32_t nb)
 {
     return 0;
 }
 
-void lnvm_exit (struct nvm_ftl *ftl)
+static void lnvm_exit (struct nvm_ftl *ftl)
 {
     pthread_mutex_destroy (&endio_mutex);
 }
