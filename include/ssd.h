@@ -135,6 +135,9 @@ struct nvm_io_cmd {
 #include "nvme.h"
 
 struct NvmeCtrl;
+struct NvmeCmd;
+struct NvmeCtrl;
+struct NvmeRequest;
 union NvmeRegs;
 
 enum {
@@ -406,6 +409,7 @@ void nvme_process_db (struct NvmeCtrl *, uint64_t, uint64_t);
 /* nvme functions used by tests */
 uint16_t nvme_admin_cmd (struct NvmeCtrl *, struct NvmeCmd *,
                                                         struct NvmeRequest *);
+uint16_t nvme_io_cmd (struct NvmeCtrl *, struct NvmeCmd *,struct NvmeRequest *);
 
 /* pcie handler init function */
 int dfcpcie_init();

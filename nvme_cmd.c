@@ -18,7 +18,7 @@ inline uint8_t nvme_write_to_host(void *src, uint64_t prp, ssize_t size)
         host_ptr = (core.run_flag & RUN_TESTS) ?
               (void *) prp : (void *) (core.nvm_pcie->host_io_mem->addr + prp);
 
-        if ((!(core.run_flag & RUN_TESTS) && host_ptr >
+        if ((!(core.run_flag & RUN_TESTS) && (uint64_t) host_ptr >
                                             core.nvm_pcie->host_io_mem->addr +
                                             core.nvm_pcie->host_io_mem->size) ||
                                             nvm_memcheck(src))
@@ -42,7 +42,7 @@ inline uint8_t nvme_read_from_host(void *dest, uint64_t prp, ssize_t size)
         host_ptr = (core.run_flag & RUN_TESTS) ?
               (void *) prp : (void *) (core.nvm_pcie->host_io_mem->addr + prp);
 
-        if ((!(core.run_flag & RUN_TESTS) && host_ptr >
+        if ((!(core.run_flag & RUN_TESTS) && (uint64_t) host_ptr >
                                             core.nvm_pcie->host_io_mem->addr +
                                             core.nvm_pcie->host_io_mem->size) ||
                                             nvm_memcheck(dest))

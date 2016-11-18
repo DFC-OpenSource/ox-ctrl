@@ -886,7 +886,7 @@ inline void nvme_set_error_page (NvmeCtrl *n, uint16_t sqid, uint16_t cid,
     ++n->num_errors;
 }
 
-static uint16_t nvme_admin_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
+uint16_t nvme_admin_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
 {
     n->stat.tot_num_AdminCmd += 1;
 
@@ -942,7 +942,7 @@ static uint16_t nvme_admin_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     }
 }
 
-static uint16_t nvme_io_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
+uint16_t nvme_io_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
 {
     NvmeNamespace *ns;
     uint32_t nsid = cmd->nsid;
@@ -1027,7 +1027,7 @@ static uint16_t nvme_io_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     }
 }
 
-static void nvme_rw_cb (void *opaque)
+void nvme_rw_cb (void *opaque)
 {
     NvmeRequest *req = (NvmeRequest *) opaque;
     NvmeSQ *sq = req->sq;
