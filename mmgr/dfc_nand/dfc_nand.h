@@ -13,6 +13,8 @@
 
 #define DFCNAND_RESV_BLK        0
 
+#define DFCNAND_DMA_SLOT_INDEX  32
+
 enum DFCNAND_COMMAND_ID {
     DFCNAND_PAGE_PROG           = 0xA,
     DFCNAND_PAGE_READ           = 0x1E,

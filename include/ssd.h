@@ -109,8 +109,8 @@ struct nvm_mmgr_io_cmd {
     struct timeval          tstart;
     struct timeval          tend;
 
-    /* DFC specific */
-    uint8_t                 fpga_io[170];
+    /* MMGR specific */
+    uint8_t                 rsvd[170];
 };
 
 struct nvm_io_cmd {
