@@ -120,9 +120,6 @@ static struct tests_io_request *tests_new_io_req (struct nvm_ppa_addr *ppa,
                                                           TESTS_SEC_SZ * sec_i;
 
 ERASE:
-    /* Ox for now exposes only 1 channel to the host and sum all LUNs */
-    //ppa->g.lun = ppa->g.ch * TESTS_LUNS + ppa->g.lun;
-    //ppa->g.ch = 0;
     for (sec_i = 0; sec_i < n_sec; sec_i++) {
         ppa_list[sec_i].g.ch = ppa->g.ch;
         ppa_list[sec_i].g.lun = ppa->g.lun;

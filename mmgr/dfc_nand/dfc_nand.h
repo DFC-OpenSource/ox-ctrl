@@ -14,7 +14,7 @@
 #define DFCNAND_RESV_BLK        0
 #define DFCNAND_RESV_BLK_COUNT  1
 
-#define DFCNAND_DMA_SLOT_INDEX  32
+#define DFCNAND_DMA_SLOT_INDEX  64
 
 enum DFCNAND_COMMAND_ID {
     DFCNAND_PAGE_PROG           = 0xA,
@@ -39,7 +39,7 @@ enum {
 
 struct dfcnand_io {
     uint8_t                  *virt_addr;
-    uint32_t                 prp_index;
+    int                      prp_index;
     uint8_t                  cmd_type;
     struct nvm_mmgr_io_cmd   *nvm_mmgr_io;
 };

@@ -22,7 +22,7 @@
 static atomic_t        nextprp;
 static pthread_mutex_t prp_mutex;
 static pthread_mutex_t prpmap_mutex;
-static uint32_t        prp_map;
+static uint64_t        prp_map;
 struct nvm_mmgr dfcnand;
 
 static uint16_t dfcnand_vir_to_phy_lun (uint16_t vir){
@@ -43,12 +43,12 @@ static int dfcnand_start_prp_map()
     nextprp.counter = ATOMIC_INIT_RUNTIME(0);
     pthread_mutex_init (&prp_mutex, NULL);
     pthread_mutex_init (&prpmap_mutex, NULL);
-    prp_map = 0x0;
+    prp_map = 0x0 & AND64;
 
     return 0;
 }
 
-static void dfcnand_set_prp_map(uint32_t index, uint8_t flag)
+static void dfcnand_set_prp_map(int index, uint8_t flag)
 {
     pthread_mutex_lock(&prpmap_mutex);
     prp_map = (flag)
@@ -57,8 +57,8 @@ static void dfcnand_set_prp_map(uint32_t index, uint8_t flag)
     pthread_mutex_unlock(&prpmap_mutex);
 }
 
-static uint32_t dfcnand_get_next_prp(io_cmd *cmd){
-    uint32_t next = 0;
+static int dfcnand_get_next_prp(io_cmd *cmd){
+    int next = 0;
 
     do {
         pthread_mutex_lock(&prp_mutex);
