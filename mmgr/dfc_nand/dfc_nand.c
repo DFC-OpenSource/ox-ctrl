@@ -399,7 +399,7 @@ static int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
 
 static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
-    int i, n, nsp = 0;
+    int i, n, pl, nsp = 0, trsv;
 
     for(i = 0; i < nc; i++){
         ch[i].ch_mmgr_id = i;
@@ -421,19 +421,22 @@ static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
                        NAND_PLANE_COUNT *
                        NAND_PAGE_COUNT;
 
-        ch[i].mmgr_rsv = 3;
-        ch[i].mmgr_rsv_list = malloc (ch[i].mmgr_rsv *
-                                                sizeof(struct nvm_ppa_addr));
+
+        ch[i].mmgr_rsv = DFCNAND_RESV_BLK_COUNT;
+        trsv = ch[i].mmgr_rsv * NAND_PLANE_COUNT;
+        ch[i].mmgr_rsv_list = malloc (trsv * sizeof(struct nvm_ppa_addr));
+
         if (!ch[i].mmgr_rsv_list)
             return EMEM;
 
-        for (n = 0; n < ch[i].mmgr_rsv; n++)
-            ch[i].mmgr_rsv_list[n].ppa = (uint64_t) (n & 0xffffffffffffffff);
+        memset (ch[i].mmgr_rsv_list, 0, trsv * sizeof(struct nvm_ppa_addr));
 
-        ch[i].ftl_rsv = 0;
-        ch[i].ftl_rsv_list = malloc (sizeof(struct nvm_ppa_addr));
-        if (!ch[i].ftl_rsv_list)
-            return EMEM;
+        for (n = 0; n < ch[i].mmgr_rsv; n++) {
+            for (pl = 0; pl < NAND_PLANE_COUNT; pl++) {
+                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.blk = n;
+                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.pl = pl;
+            }
+        }
 
         ch[i].tot_bytes = 0;
         ch[i].slba = 0;

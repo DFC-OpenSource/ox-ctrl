@@ -19,16 +19,16 @@
 #include <sys/queue.h>
 #include "ftl_lnvm.h"
 
-LIST_HEAD(lnvm_ch, nvm_channel) ch_head = LIST_HEAD_INITIALIZER(ch_head);
+LIST_HEAD(lnvm_ch, lnvm_channel) ch_head = LIST_HEAD_INITIALIZER(ch_head);
 
 static pthread_mutex_t endio_mutex;
 
-static struct nvm_channel *lnvm_get_ch_instance(uint16_t ch_id)
+static struct lnvm_channel *lnvm_get_ch_instance(uint16_t ch_id)
 {
-    struct nvm_channel *ch;
-    LIST_FOREACH(ch, &ch_head, entry){
-        if(ch->ch_mmgr_id == ch_id)
-            return ch;
+    struct lnvm_channel *lch;
+    LIST_FOREACH(lch, &ch_head, entry){
+        if(lch->ch->ch_mmgr_id == ch_id)
+            return lch;
     }
 
     return NULL;
@@ -236,17 +236,63 @@ static int lnvm_submit_io (struct nvm_io_cmd *cmd)
 
 static int lnvm_init_channel (struct nvm_channel *ch)
 {
-    /* Blks 2 and 3 (block 1 for dual-plane) in the lun 0 belong to lnvm */
-    ch->ftl_rsv = 2;
-    ch->ftl_rsv_list = realloc(ch->ftl_rsv_list, ch->ftl_rsv *
-                                                sizeof(struct nvm_ppa_addr));
-    if (nvm_memcheck(ch->ftl_rsv_list))
+    struct lnvm_channel *lch;
+    uint32_t tblks;
+    int rsv, l_addr, b_addr, pl_addr, trsv, n, pl, n_pl;
+
+    n_pl = ch->geometry->n_of_planes;
+    ch->ftl_rsv = FTL_LNVM_RSV_BLK;
+    trsv = ch->ftl_rsv * n_pl;
+    ch->ftl_rsv_list = malloc (trsv * sizeof(struct nvm_ppa_addr));
+
+    if (!ch->ftl_rsv_list)
         return EMEM;
 
-    ch->ftl_rsv_list[0].ppa = (uint64_t) (2 & AND64);
-    ch->ftl_rsv_list[1].ppa = (uint64_t) (3 & AND64);
+    memset (ch->ftl_rsv_list, 0, trsv * sizeof(struct nvm_ppa_addr));
 
-    LIST_INSERT_HEAD(&ch_head, ch, entry);
+    for (n = 0; n < ch->ftl_rsv; n++) {
+        for (pl = 0; pl < n_pl; pl++) {
+            ch->ftl_rsv_list[n_pl * n + pl].g.blk = n + ch->mmgr_rsv;
+            ch->ftl_rsv_list[n_pl * n + pl].g.pl = pl;
+        }
+    }
+
+    lch = malloc (sizeof(struct lnvm_channel));
+    if (!lch)
+        return EMEM;
+
+    tblks = ch->geometry->blk_per_lun * ch->geometry->lun_per_ch * n_pl;
+
+    lch->ch = ch;
+    lch->bbtbl = malloc (sizeof(uint8_t) * tblks);
+    if (!lch->bbtbl)
+        return EMEM;
+
+    memset (lch->bbtbl, 0, tblks);
+
+    /* TODO: Verify if bbtbl exists in non-volatile storage
+             if not, create it and flush to nvm
+             get bbtbl from non-volatile storage
+             flush bbtbl to nvm when get a set_bb_tbl with ppa sector > 0
+             move the loopings below to a bbtbl create fn */
+
+    /* Set FTL reserved bad blocks */
+    for (rsv = 0; rsv < ch->ftl_rsv * n_pl; rsv++){
+        l_addr = ch->ftl_rsv_list[rsv].g.lun * ch->geometry->blk_per_lun * n_pl;
+        b_addr = ch->ftl_rsv_list[rsv].g.blk * n_pl;
+        pl_addr = ch->ftl_rsv_list[rsv].g.pl;
+        lch->bbtbl[l_addr + b_addr + pl_addr] = 0x1;
+    }
+
+    /* Set MMGR reserved bad blocks */
+    for (rsv = 0; rsv < ch->mmgr_rsv  * n_pl; rsv++){
+        l_addr = ch->mmgr_rsv_list[rsv].g.lun * ch->geometry->blk_per_lun*n_pl;
+        b_addr = ch->mmgr_rsv_list[rsv].g.blk * n_pl;
+        pl_addr = ch->mmgr_rsv_list[rsv].g.pl;
+        lch->bbtbl[l_addr + b_addr + pl_addr] = 0x1;
+    }
+
+    LIST_INSERT_HEAD(&ch_head, lch, entry);
     log_info("    [lnvm: channel %d started with %d bad blocks.\n",ch->ch_id,
                                                     ch->mmgr_rsv+ch->ftl_rsv);
     return 0;
@@ -255,41 +301,49 @@ static int lnvm_init_channel (struct nvm_channel *ch)
 static int lnvm_ftl_get_bbtbl (struct nvm_ppa_addr *ppa, uint8_t *bbtbl,
                                                                     uint32_t nb)
 {
-    int j;
-    struct nvm_channel *ch = lnvm_get_ch_instance(ppa->g.ch);
+    struct lnvm_channel *lch = lnvm_get_ch_instance(ppa->g.ch);
+    struct nvm_channel *ch = lch->ch;
+    int l_addr = ppa->g.lun * ch->geometry->blk_per_lun;
 
     if (nvm_memcheck(bbtbl) || nvm_memcheck(ch) ||
                                         nb != ch->geometry->blk_per_lun *
                                         (ch->geometry->n_of_planes & 0xffff))
         return -1;
 
-    memset(bbtbl, 0, nb);
-
-    /* TODO: get bbtbl from non-volatile storage */
-    /* TODO: set rsv bad blks when start ch and flush to nvm */
-
-    /* Set FTL reserved bad blocks */
-    for (j = 0; j < ch->ftl_rsv; j++){
-        if (ch->ftl_rsv_list[j].g.lun == ppa->g.lun)
-            bbtbl[ch->ftl_rsv_list[j].g.blk] = 0x1;
-    }
-
-    /* Set MMGR reserved bad blocks */
-    for (j = 0; j < ch->mmgr_rsv; j++){
-        if (ch->mmgr_rsv_list[j].g.lun == ppa->g.lun)
-            bbtbl[ch->mmgr_rsv_list[j].g.blk] = 0x1;
-    }
+    memcpy(bbtbl, &lch->bbtbl[l_addr], nb);
 
     return 0;
 }
 
-static int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint32_t nb)
+static int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint8_t value)
 {
+    int l_addr, n_pl;
+    struct lnvm_channel *lch = lnvm_get_ch_instance(ppa->g.ch);
+
+    n_pl = lch->ch->geometry->n_of_planes;
+
+    if ((ppa->g.blk * n_pl + ppa->g.pl) >
+                                   (lch->ch->geometry->blk_per_lun * n_pl - 1))
+        return -1;
+
+    l_addr = ppa->g.lun * lch->ch->geometry->blk_per_lun * n_pl;
+    lch->bbtbl[l_addr + (ppa->g.blk * n_pl + ppa->g.pl)] = value;
+
     return 0;
 }
 
 static void lnvm_exit (struct nvm_ftl *ftl)
 {
+    struct lnvm_channel *lch;
+    LIST_FOREACH(lch, &ch_head, entry){
+        free(lch->bbtbl);
+    }
+    do {
+        lch = LIST_FIRST(&ch_head);
+        LIST_REMOVE (lch, entry);
+        free (lch);
+    } while (!LIST_EMPTY(&ch_head));
+
     pthread_mutex_destroy (&endio_mutex);
 }
 

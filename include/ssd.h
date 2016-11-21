@@ -265,7 +265,7 @@ typedef void      (nvm_ftl_callback_io)(struct nvm_mmgr_io_cmd *);
 typedef int       (nvm_ftl_init_channel)(struct nvm_channel *);
 typedef void      (nvm_ftl_exit)(struct nvm_ftl *);
 typedef int       (nvm_ftl_get_bbtbl)(struct nvm_ppa_addr *,uint8_t *,uint32_t);
-typedef int       (nvm_ftl_set_bbtbl)(struct nvm_ppa_addr *, uint32_t);
+typedef int       (nvm_ftl_set_bbtbl)(struct nvm_ppa_addr *, uint8_t);
 
 struct nvm_ftl_ops {
     nvm_ftl_submit_io      *submit_io; /* FTL queue request consumer */

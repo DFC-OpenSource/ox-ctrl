@@ -12,6 +12,7 @@
 #define NAND_VIRTUAL_LUNS       4
 
 #define DFCNAND_RESV_BLK        0
+#define DFCNAND_RESV_BLK_COUNT  1
 
 #define DFCNAND_DMA_SLOT_INDEX  32
 

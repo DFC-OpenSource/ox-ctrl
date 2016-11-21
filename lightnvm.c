@@ -102,19 +102,37 @@ out:
 
 uint16_t lnvm_set_bb_tbl(NvmeCtrl *n, NvmeCmd *nvmecmd, NvmeRequest *req)
 {
-    NvmeNamespace *ns;
-    LnvmCtrl *ln;
-    LnvmIdGroup *c;
     LnvmSetBBTbl *cmd = (LnvmSetBBTbl*)nvmecmd;
+    struct nvm_ppa_addr *psl;
+    uint16_t bbtbl_format = FTL_BBTBL_BYTE;
+    void *arg[4];
+    int i, ret;
 
-    uint32_t nsid = cmd->nsid;
-    uint64_t prp1 = cmd->prp1;
     uint64_t spba = cmd->spba;
-    uint16_t nlb = cmd->nlb;
+    uint16_t nlb = cmd->nlb + 1;
     uint8_t value = cmd->value;
 
-    /* TODO: Wait for host LightNVM implementation before */
-    //printf("SetBBtbl. spba: 0x%016x, nlb: %d, value: %d\n", spba, nlb, value);
+    psl = malloc (sizeof(struct nvm_ppa_addr) * nlb);
+    if (!psl)
+        return NVME_INTERNAL_DEV_ERROR;
+
+    if (nlb > 1) {
+        nvme_read_from_host((void *)psl, spba, nlb * sizeof(uint64_t));
+    } else {
+        psl[0].ppa = spba;
+    }
+
+    for(i = 0; i < nlb; i++) {
+        /* set single block to FTL */
+        psl[i].g.sec = 0;
+        arg[0] = &psl[i].ppa;
+        arg[1] = &value;
+        arg[2] = &bbtbl_format;
+
+        ret = nvm_ftl_cap_exec(FTL_CAP_SET_BBTBL, arg, 3);
+        if (ret)
+            return NVME_INVALID_FIELD;
+    }
 
     return NVME_SUCCESS;
 }

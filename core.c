@@ -708,14 +708,11 @@ static int nvm_ftl_cap_get_bbtbl (struct nvm_ppa_addr *ppa,
 static int nvm_ftl_cap_set_bbtbl (struct nvm_ppa_addr *ppa,
                                             struct nvm_channel *ch, void **arg)
 {
-    uint32_t *nblk      = (uint32_t *) arg[1];
+    uint8_t *value      = (uint8_t *)  arg[1];
     uint16_t *bb_format = (uint16_t *) arg[2];
 
-    if (*nblk < 1)
-        return -1;
-
     if (ch->ftl->bbtbl_format == *bb_format)
-        return ch->ftl->ops->set_bbtbl(ppa, *nblk);
+        return ch->ftl->ops->set_bbtbl(ppa, *value);
 
     return -1;
 }
@@ -754,10 +751,12 @@ int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
 
             if (narg < 3 || nvm_memcheck(ch->ftl->ops->set_bbtbl))
                 goto OUT;
+
             if (ch->ftl->cap & 1 << FTL_CAP_SET_BBTBL) {
                 if (nvm_ftl_cap_set_bbtbl(ppa, ch, arg)) goto OUT;
                 return 0;
             }
+
             break;
 
         case FTL_CAP_GET_L2PTBL:
