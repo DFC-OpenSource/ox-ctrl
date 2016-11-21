@@ -184,6 +184,9 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
     if (strlen(ftl->name) > MAX_NAME_SIZE)
         return EMAX_NAME_SIZE;
 
+    if (ftl->nq < core.nvm_ch_count)
+        log_info("  [WARNING: n of FTL queues < tot of MMGR channels.\n");
+
     pthread_mutex_init (&ftl->q_mutex, NULL);
     ftl->active = 1;
     ftl->last_q = ftl->nq - 1;
@@ -332,7 +335,9 @@ int nvm_submit_io (struct nvm_io_cmd *io)
     retry = 16;
     cmd_addr = (uint64_t) io;
 
-    qid = nvm_ftl_q_schedule(ch->ftl);
+    /* TODO: make native per-channel FTL queues */
+    
+    qid = ch->ch_mmgr_id; /* nvm_ftl_q_schedule(ch->ftl); */
     do {
         ret = mq_send(ch->ftl->mq_id[qid], (char *) &cmd_addr,
                                                          sizeof (uint64_t), 1);
