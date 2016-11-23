@@ -12,16 +12,20 @@
 #ifndef FTL_LNVM_H
 #define FTL_LNVM_H
 
+#include <sys/queue.h>
 #include "../../include/ssd.h"
 
 #define FTL_LNVM_IO_RETRY     16
+#define FTL_LNVM_RSV_BLK      1
 
 struct lnvm_page {
 
 };
 
 struct lnvm_channel {
-    struct nvm_channel     *ch;
+    struct nvm_channel       *ch;
+    uint8_t                  *bbtbl;
+    LIST_ENTRY(lnvm_channel) entry;
 };
 
 #endif /* FTL_LNVM_H */

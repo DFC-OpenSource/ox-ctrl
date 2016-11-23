@@ -1,3 +1,34 @@
+/* OX: Open-Channel NVM Express SSD Controller
+ *
+ *  - LightNVM NVMe Extension + Command Parser
+ *
+ * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
+ * Written by Ivan Luiz Picoli <ivpi@itu.dk>
+ *
+ * Funding support provided by CAPES Foundation, Ministry of Education
+ * of Brazil, Brasilia - DF 70040-020, Brazil.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation
+ *  and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include <syslog.h>
 #include <string.h>
 #include <sys/queue.h>
@@ -102,19 +133,37 @@ out:
 
 uint16_t lnvm_set_bb_tbl(NvmeCtrl *n, NvmeCmd *nvmecmd, NvmeRequest *req)
 {
-    NvmeNamespace *ns;
-    LnvmCtrl *ln;
-    LnvmIdGroup *c;
     LnvmSetBBTbl *cmd = (LnvmSetBBTbl*)nvmecmd;
+    struct nvm_ppa_addr *psl;
+    uint16_t bbtbl_format = FTL_BBTBL_BYTE;
+    void *arg[4];
+    int i, ret;
 
-    uint32_t nsid = cmd->nsid;
-    uint64_t prp1 = cmd->prp1;
     uint64_t spba = cmd->spba;
-    uint16_t nlb = cmd->nlb;
+    uint16_t nlb = cmd->nlb + 1;
     uint8_t value = cmd->value;
 
-    /* TODO: Wait for host LightNVM implementation before */
-    //printf("SetBBtbl. spba: 0x%016x, nlb: %d, value: %d\n", spba, nlb, value);
+    psl = malloc (sizeof(struct nvm_ppa_addr) * nlb);
+    if (!psl)
+        return NVME_INTERNAL_DEV_ERROR;
+
+    if (nlb > 1) {
+        nvme_read_from_host((void *)psl, spba, nlb * sizeof(uint64_t));
+    } else {
+        psl[0].ppa = spba;
+    }
+
+    for(i = 0; i < nlb; i++) {
+        /* set single block to FTL */
+        psl[i].g.sec = 0;
+        arg[0] = &psl[i].ppa;
+        arg[1] = &value;
+        arg[2] = &bbtbl_format;
+
+        ret = nvm_ftl_cap_exec(FTL_CAP_SET_BBTBL, arg, 3);
+        if (ret)
+            return NVME_INVALID_FIELD;
+    }
 
     return NVME_SUCCESS;
 }

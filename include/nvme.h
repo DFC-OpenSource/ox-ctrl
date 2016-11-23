@@ -1,3 +1,35 @@
+/* OX: Open-Channel NVM Express SSD Controller
+ *
+ *  - NVMe Express Standard
+ *
+ * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
+ * Written by Ivan Luiz Picoli <ivpi@itu.dk>
+ * This file has been modified from the QEMU project.
+ *
+ * Funding support provided by CAPES Foundation, Ministry of Education
+ * of Brazil, Brasilia - DF 70040-020, Brazil.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation
+ *  and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #ifndef NVME_H
 #define NVME_H
 
@@ -996,9 +1028,23 @@ typedef struct NvmeCtrl {
 #endif /* LIGHTNVM */
 } NvmeCtrl;
 
-void nvme_exit(void);
-uint8_t nvme_write_to_host(void *, uint64_t, ssize_t);
-uint8_t nvme_read_from_host(void *, uint64_t, ssize_t);
+void     nvme_exit(void);
+uint8_t  nvme_write_to_host(void *, uint64_t, ssize_t);
+uint8_t  nvme_read_from_host(void *, uint64_t, ssize_t);
+uint16_t nvme_init_cq (NvmeCQ *, NvmeCtrl *, uint64_t, uint16_t, uint16_t,
+        uint16_t, uint16_t, int);
+uint16_t nvme_init_sq (NvmeSQ *, NvmeCtrl *, uint64_t, uint16_t, uint16_t,
+        uint16_t, enum NvmeQFlags, int);
+void     nvme_enqueue_req_completion (NvmeCQ *, NvmeRequest *);
+void     nvme_post_cqes (void *);
+int      nvme_check_cqid (NvmeCtrl *, uint16_t);
+int      nvme_check_sqid (NvmeCtrl *, uint16_t);
+void     nvme_free_sq (NvmeSQ *, NvmeCtrl *);
+void     nvme_free_cq (NvmeCQ *, NvmeCtrl *);
+void     nvme_addr_read (NvmeCtrl *, uint64_t, void *, int);
+void     nvme_addr_write (NvmeCtrl *, uint64_t, void *, int);
+void     nvme_enqueue_event (NvmeCtrl *, uint8_t, uint8_t, uint8_t);
+void     nvme_rw_cb (void *);
 
 /* NVMe Admin cmd */
 uint16_t nvme_identify (NvmeCtrl *, NvmeCmd *);
@@ -1011,6 +1057,7 @@ uint16_t nvme_get_feature (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 uint16_t nvme_get_log(NvmeCtrl *, NvmeCmd *);
 uint16_t nvme_async_req (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 uint16_t nvme_format (NvmeCtrl *, NvmeCmd *);
+uint16_t nvme_abort_req (NvmeCtrl *, NvmeCmd *, uint32_t *);
 
 /* NVMe IO cmd */
 uint16_t nvme_write_uncor(NvmeCtrl *,NvmeNamespace *,NvmeCmd *,NvmeRequest *);
@@ -1022,16 +1069,17 @@ uint16_t nvme_rw (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
 
 #if LIGHTNVM
 /* LNVM functions */
-int lnvm_init(NvmeCtrl *);
+int     lnvm_init(NvmeCtrl *);
 uint8_t lnvm_dev(NvmeCtrl *);
-void lnvm_set_default(LnvmCtrl *);
-void lightnvm_exit(NvmeCtrl *);
-void lnvm_init_id_ctrl(LnvmIdCtrl *);
+void    lnvm_set_default(LnvmCtrl *);
+void    lightnvm_exit(NvmeCtrl *);
+void    lnvm_init_id_ctrl(LnvmIdCtrl *);
 
 /* LNVM Admin cmd */
 uint16_t lnvm_identity(NvmeCtrl *, NvmeCmd *);
 uint16_t lnvm_get_l2p_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 uint16_t lnvm_get_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+uint16_t lnvm_set_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 
 /* LNVM IO cmd */
 uint16_t lnvm_erase_sync(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);

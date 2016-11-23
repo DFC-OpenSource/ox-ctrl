@@ -1,4 +1,6 @@
-/* OX: OpenChannel NVM Express SSD Controller
+/* OX: Open-Channel NVM Express SSD Controller
+ *
+ *  - DFC NAND Media Manager
  *
  * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
  * Written by Ivan Luiz Picoli <ivpi@itu.dk>
@@ -6,7 +8,25 @@
  * Funding support provided by CAPES Foundation, Ministry of Education
  * of Brazil, Brasilia - DF 70040-020, Brazil.
  *
- * This code is licensed under the GNU GPL v2 or later.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation
+ *  and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #include "../../include/ssd.h"
@@ -22,7 +42,7 @@
 static atomic_t        nextprp;
 static pthread_mutex_t prp_mutex;
 static pthread_mutex_t prpmap_mutex;
-static uint8_t         *prp_map;
+static uint64_t        prp_map;
 struct nvm_mmgr dfcnand;
 
 static uint16_t dfcnand_vir_to_phy_lun (uint16_t vir){
@@ -43,43 +63,48 @@ static int dfcnand_start_prp_map()
     nextprp.counter = ATOMIC_INIT_RUNTIME(0);
     pthread_mutex_init (&prp_mutex, NULL);
     pthread_mutex_init (&prpmap_mutex, NULL);
-    prp_map = calloc(sizeof(uint8_t), 2048);
-    if (nvm_memcheck(prp_map))
-        return EMEM;
+    prp_map = 0x0 & AND64;
+
     return 0;
 }
 
-static void dfcnand_set_prp_map(uint32_t index, uint8_t flag)
+static void dfcnand_set_prp_map(int index, uint8_t flag)
 {
     pthread_mutex_lock(&prpmap_mutex);
-    prp_map[index / 8] = (flag)
-            ? prp_map[index / 8] | 1 << (index % 8)
-            : prp_map[index / 8] ^ 1 << (index % 8);
+    prp_map = (flag)
+            ? prp_map | (1 << (index - 1))
+            : prp_map ^ (1 << (index - 1));
     pthread_mutex_unlock(&prpmap_mutex);
 }
 
-static uint32_t dfcnand_get_next_prp(io_cmd *cmd){
-    uint16_t ni = 8;
-    uint16_t noff = 1;
-    uint32_t next;
-    pthread_mutex_lock(&prp_mutex);
+static int dfcnand_get_next_prp(io_cmd *cmd){
+    int next = 0;
+
     do {
+        pthread_mutex_lock(&prp_mutex);
         next = atomic_read(&nextprp);
-        next = (next >= ni*noff) ? 1 : ++next;
+
+        if (next == DFCNAND_DMA_SLOT_INDEX)
+            next = 1;
+        else
+            next++;
+
         atomic_set(&nextprp, next);
-        next--;
-        if (prp_map[next / 8] & 1 << (next % 8)) {
+        pthread_mutex_unlock (&prp_mutex);
+
+        pthread_mutex_lock(&prpmap_mutex);
+        if (prp_map & (1 << (next - 1))) {
+            pthread_mutex_unlock(&prpmap_mutex);
             usleep(1);
             continue;
         }
-        pthread_mutex_unlock (&prp_mutex);
+        pthread_mutex_unlock(&prpmap_mutex);
 
         dfcnand_set_prp_map(next, 0x1);
 
         cmd->dfc_io.prp_index = next;
 
-        /* vector index (16 bits) + offset index (16 bits) */
-        return (next / noff)+1 << 16 | (next % noff);
+        return next - 1;
     } while (1);
 }
 
@@ -118,9 +143,9 @@ static int dfcnand_dma_helper (io_cmd *cmd)
     return ret;
 }
 
-int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
+static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
-    io_cmd *cmd = (struct io_cmd *) cmd_nvm->fpga_io;
+    io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
     int c;
 
     uint32_t sec_sz = NAND_SECTOR_SIZE;
@@ -136,10 +161,8 @@ int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
     uint32_t prp_map = dfcnand_get_next_prp(cmd);
-    uint16_t vec_index = prp_map >> 16;
-    uint32_t offset = (prp_map & 0x0000ffff) * sec_sz * 5;
 
-    cmd->dfc_io.virt_addr = virt_addr[vec_index] + offset;
+    cmd->dfc_io.virt_addr = virt_addr[prp_map];
     memset(cmd->dfc_io.virt_addr, 0, pg_sz + oob_sz);
 
     cmd->dfc_io.nvm_mmgr_io = cmd_nvm;
@@ -156,8 +179,7 @@ int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     for (c = 0; c < 5; c++) {
         cmd->len[c] = sec_sz;
-        cmd->host_addr[c] = (uint64_t) phy_addr[vec_index]
-                                                      + offset + sec_sz * c;
+        cmd->host_addr[c] = (uint64_t) phy_addr[prp_map] + sec_sz * c;
       }
     cmd->col_addr = 0x0;
     cmd->len[4] = cmd_nvm->md_sz;
@@ -174,10 +196,10 @@ CLEAN:
     return -1;
 }
 
-int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
+static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
     int c;
-    io_cmd *cmd = (struct io_cmd *) cmd_nvm->fpga_io;
+    io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
 
     uint32_t sec_sz = NAND_SECTOR_SIZE;
     uint32_t pg_sz  = NAND_PAGE_SIZE;
@@ -192,13 +214,11 @@ int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
     uint32_t prp_map = dfcnand_get_next_prp(cmd);
-    uint16_t vec_index = prp_map >> 16;
-    uint32_t offset = (prp_map & 0x0000ffff) * sec_sz * 5;
 
     cmd->dfc_io.nvm_mmgr_io = cmd_nvm;
 
     /*Page Write -16K + 1K OOB*/
-    cmd->dfc_io.virt_addr = virt_addr[vec_index] + offset;
+    cmd->dfc_io.virt_addr = virt_addr[prp_map];
 
     cmd->lun = phytl & 0x00ff;
     cmd->chip = cmd_nvm->ppa.g.ch;
@@ -214,7 +234,7 @@ int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     for (c = 0; c < 5; c++) {
         cmd->len[c] = sec_sz;
-        cmd->host_addr[c] = (uint64_t)phy_addr[vec_index] + offset + sec_sz * c;
+        cmd->host_addr[c] = (uint64_t)phy_addr[prp_map] + sec_sz * c;
     }
     cmd->len[4] = cmd_nvm->md_sz;
 
@@ -230,9 +250,9 @@ CLEAN:
     return -1;
 }
 
-int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
+static int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
-    io_cmd *cmd = (struct io_cmd *) cmd_nvm->fpga_io;
+    io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
     memset(cmd, 0, sizeof(cmd));
     cmd->dfc_io.nvm_mmgr_io = cmd_nvm;
@@ -255,13 +275,12 @@ CLEAN:
     return -1;
 }
 
-void dfcnand_exit (struct nvm_mmgr *mmgr)
+static void dfcnand_exit (struct nvm_mmgr *mmgr)
 {
     int i;
     nand_dm_deinit();
     pthread_mutex_destroy(&prp_mutex);
     pthread_mutex_destroy(&prpmap_mutex);
-    free(prp_map);
     for (i = 0; i < mmgr->geometry->n_of_ch; i++) {
         free(mmgr->ch_info->mmgr_rsv_list);
         free(mmgr->ch_info->ftl_rsv_list);
@@ -297,7 +316,7 @@ static int dfcnand_io_rsv_blk (struct nvm_channel *ch, uint8_t cmdtype,
     return ret;
 }
 
-int dfcnand_read_nvminfo (struct nvm_channel *ch)
+static int dfcnand_read_nvminfo (struct nvm_channel *ch)
 {
     int ret, pg, i;
     struct nvm_channel ch_a;
@@ -386,7 +405,7 @@ OUT:
     return ret;
 }
 
-int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
+static int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
     int i;
 
@@ -398,9 +417,9 @@ int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
     return 0;
 }
 
-int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
+static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
-    int i, n, nsp = 0;
+    int i, n, pl, nsp = 0, trsv;
 
     for(i = 0; i < nc; i++){
         ch[i].ch_mmgr_id = i;
@@ -422,19 +441,22 @@ int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
                        NAND_PLANE_COUNT *
                        NAND_PAGE_COUNT;
 
-        ch[i].mmgr_rsv = 3;
-        ch[i].mmgr_rsv_list = malloc (ch[i].mmgr_rsv *
-                                                sizeof(struct nvm_ppa_addr));
+
+        ch[i].mmgr_rsv = DFCNAND_RESV_BLK_COUNT;
+        trsv = ch[i].mmgr_rsv * NAND_PLANE_COUNT;
+        ch[i].mmgr_rsv_list = malloc (trsv * sizeof(struct nvm_ppa_addr));
+
         if (!ch[i].mmgr_rsv_list)
             return EMEM;
 
-        for (n = 0; n < ch[i].mmgr_rsv; n++)
-            ch[i].mmgr_rsv_list[n].ppa = (uint64_t) (n & 0xffffffffffffffff);
+        memset (ch[i].mmgr_rsv_list, 0, trsv * sizeof(struct nvm_ppa_addr));
 
-        ch[i].ftl_rsv = 0;
-        ch[i].ftl_rsv_list = malloc (sizeof(struct nvm_ppa_addr));
-        if (!ch[i].ftl_rsv_list)
-            return EMEM;
+        for (n = 0; n < ch[i].mmgr_rsv; n++) {
+            for (pl = 0; pl < NAND_PLANE_COUNT; pl++) {
+                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.blk = n;
+                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.pl = pl;
+            }
+        }
 
         ch[i].tot_bytes = 0;
         ch[i].slba = 0;

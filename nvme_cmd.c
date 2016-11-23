@@ -1,3 +1,35 @@
+/* OX: Open-Channel NVM Express SSD Controller
+ *
+ *  - NVMe Express Command Parser
+ *
+ * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
+ * Written by Ivan Luiz Picoli <ivpi@itu.dk>
+ * This file has been modified from the QEMU project.
+ *
+ * Funding support provided by CAPES Foundation, Ministry of Education
+ * of Brazil, Brasilia - DF 70040-020, Brazil.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation
+ *  and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #include <stdint.h>
 #include <sys/queue.h>
 #include <syslog.h>
@@ -18,7 +50,7 @@ inline uint8_t nvme_write_to_host(void *src, uint64_t prp, ssize_t size)
         host_ptr = (core.run_flag & RUN_TESTS) ?
               (void *) prp : (void *) (core.nvm_pcie->host_io_mem->addr + prp);
 
-        if ((!(core.run_flag & RUN_TESTS) && host_ptr >
+        if ((!(core.run_flag & RUN_TESTS) && (uint64_t) host_ptr >
                                             core.nvm_pcie->host_io_mem->addr +
                                             core.nvm_pcie->host_io_mem->size) ||
                                             nvm_memcheck(src))
@@ -42,7 +74,7 @@ inline uint8_t nvme_read_from_host(void *dest, uint64_t prp, ssize_t size)
         host_ptr = (core.run_flag & RUN_TESTS) ?
               (void *) prp : (void *) (core.nvm_pcie->host_io_mem->addr + prp);
 
-        if ((!(core.run_flag & RUN_TESTS) && host_ptr >
+        if ((!(core.run_flag & RUN_TESTS) && (uint64_t) host_ptr >
                                             core.nvm_pcie->host_io_mem->addr +
                                             core.nvm_pcie->host_io_mem->size) ||
                                             nvm_memcheck(dest))

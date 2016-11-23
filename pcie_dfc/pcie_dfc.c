@@ -1,3 +1,35 @@
+/* OX: Open-Channel NVM Express SSD Controller
+ *
+ *  - DFC PCIe Handler
+ *
+ * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
+ * Written by Ivan Luiz Picoli <ivpi@itu.dk>
+ * This file has been modified from the VVDN issd-nvme controller.
+ *
+ * Funding support provided by CAPES Foundation, Ministry of Education
+ * of Brazil, Brasilia - DF 70040-020, Brazil.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation
+ *  and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 #ifndef __USE_GNU
 #define __USE_GNU
 #endif
@@ -153,7 +185,7 @@ CLEAN_EXIT:
     return;
 }
 
-void pcie_munmap_host_mem (struct pci_ctrl *pci)
+static void pcie_munmap_host_mem (struct pci_ctrl *pci)
 {
 	if (pci->io_mem.addr) {
 		munmap ((void *)pci->io_mem.addr, pci->io_mem.size);
@@ -165,7 +197,7 @@ void pcie_munmap_host_mem (struct pci_ctrl *pci)
 	memset (pci, 0, sizeof (struct pci_ctrl));
 }
 
-int pcie_mmap_host_mem (struct pci_ctrl *pci)
+static int pcie_mmap_host_mem (struct pci_ctrl *pci)
 {
     int fd_host_mem = 0;
 
@@ -328,7 +360,7 @@ struct nvm_pcie pcie_dfc = {
     .name           = "PCI_LS2085",
 };
 
-void dfcpcie_isr_notify (void *opaque)
+static void dfcpcie_isr_notify (void *opaque)
 {
     NvmeCQ *cq = opaque;
     struct pci_ctrl *pci = (struct pci_ctrl *) pcie_dfc.ctrl;
@@ -355,7 +387,7 @@ static uint32_t *dfcpcie_get_iodbst_reg (void)
     return ((struct pci_ctrl *)pcie_dfc.ctrl)->iosqdb_bits;
 }
 
-void dfcpcie_exit() {
+static void dfcpcie_exit() {
     struct pci_ctrl *pcie = (struct pci_ctrl *) pcie_dfc.ctrl;
     reset_iosqdb_bits(pcie);
     reset_nvmeregs(pcie);

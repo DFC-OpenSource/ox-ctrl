@@ -1,4 +1,6 @@
-/* OX: OpenChannel NVM Express SSD Controller
+/* OX: Open-Channel NVM Express SSD Controller
+ *
+ *  - OX SSD header file
  *
  * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
  * Written by Ivan Luiz Picoli <ivpi@itu.dk>
@@ -6,7 +8,25 @@
  * Funding support provided by CAPES Foundation, Ministry of Education
  * of Brazil, Brasilia - DF 70040-020, Brazil.
  *
- * This code is licensed under the GNU GPL v2 or later.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  - Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation
+ *  and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
 #ifndef SSD_H
@@ -109,8 +129,8 @@ struct nvm_mmgr_io_cmd {
     struct timeval          tstart;
     struct timeval          tend;
 
-    /* DFC specific */
-    uint8_t                 fpga_io[170];
+    /* MMGR specific */
+    uint8_t                 rsvd[170];
 };
 
 struct nvm_io_cmd {
@@ -135,6 +155,9 @@ struct nvm_io_cmd {
 #include "nvme.h"
 
 struct NvmeCtrl;
+struct NvmeCmd;
+struct NvmeCtrl;
+struct NvmeRequest;
 union NvmeRegs;
 
 enum {
@@ -262,7 +285,7 @@ typedef void      (nvm_ftl_callback_io)(struct nvm_mmgr_io_cmd *);
 typedef int       (nvm_ftl_init_channel)(struct nvm_channel *);
 typedef void      (nvm_ftl_exit)(struct nvm_ftl *);
 typedef int       (nvm_ftl_get_bbtbl)(struct nvm_ppa_addr *,uint8_t *,uint32_t);
-typedef int       (nvm_ftl_set_bbtbl)(struct nvm_ppa_addr *, uint32_t);
+typedef int       (nvm_ftl_set_bbtbl)(struct nvm_ppa_addr *, uint8_t);
 
 struct nvm_ftl_ops {
     nvm_ftl_submit_io      *submit_io; /* FTL queue request consumer */
@@ -406,6 +429,7 @@ void nvme_process_db (struct NvmeCtrl *, uint64_t, uint64_t);
 /* nvme functions used by tests */
 uint16_t nvme_admin_cmd (struct NvmeCtrl *, struct NvmeCmd *,
                                                         struct NvmeRequest *);
+uint16_t nvme_io_cmd (struct NvmeCtrl *, struct NvmeCmd *,struct NvmeRequest *);
 
 /* pcie handler init function */
 int dfcpcie_init();

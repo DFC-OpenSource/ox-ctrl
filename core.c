@@ -1,4 +1,6 @@
-/* OX: OpenChannel NVM Express SSD Controller
+/* OX: Open-Channel NVM Express SSD Controller
+ *
+ *  - OX Controller Core
  *
  * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
  * Written by Ivan Luiz Picoli <ivpi@itu.dk>
@@ -6,9 +8,27 @@
  * Funding support provided by CAPES Foundation, Ministry of Education
  * of Brazil, Brasilia - DF 70040-020, Brazil.
  *
- * This code is licensed under the GNU GPL v2 or later.
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
  *
- * The controller core is responsible to handle and link:
+ *  - Redistributions of source code must retain the above copyright notice,
+ *  this list of conditions and the following disclaimer.
+ *  - Redistributions in binary form must reproduce the above copyright notice,
+ *  this list of conditions and the following disclaimer in the documentation
+ *  and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * The controller core is responsible to handle:
  *
  *      - Media managers: NAND, DDR, etc.
  *      - Flash Translation Layers + LightNVM raw FTL support
@@ -69,6 +89,8 @@ int nvm_register_pcie_handler (struct nvm_pcie *pcie)
     core.nvm_pcie = pcie;
 
     log_info("  [nvm: PCI Handler registered: %s]\n", pcie->name);
+
+    return 0;
 }
 
 int nvm_register_mmgr (struct nvm_mmgr *mmgr)
@@ -140,6 +162,8 @@ void *nvm_ftl_io_thread (void *arg)
     } while (ftl->active);
 
     log_info("  [ftl: IO thread (%s)(%d) killed.]\n", ftl->name, q_id);
+
+    return NULL;
 }
 
 static int nvm_create_ftl_queue (struct nvm_ftl *ftl, uint8_t index)
@@ -179,6 +203,9 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
 
     if (strlen(ftl->name) > MAX_NAME_SIZE)
         return EMAX_NAME_SIZE;
+
+    if (ftl->nq < core.nvm_ch_count)
+        log_info("  [WARNING: n of FTL queues < tot of MMGR channels.\n");
 
     pthread_mutex_init (&ftl->q_mutex, NULL);
     ftl->active = 1;
@@ -328,7 +355,9 @@ int nvm_submit_io (struct nvm_io_cmd *io)
     retry = 16;
     cmd_addr = (uint64_t) io;
 
-    qid = nvm_ftl_q_schedule(ch->ftl);
+    /* TODO: make native per-channel FTL queues */
+
+    qid = ch->ch_mmgr_id; /* nvm_ftl_q_schedule(ch->ftl); */
     do {
         ret = mq_send(ch->ftl->mq_id[qid], (char *) &cmd_addr,
                                                          sizeof (uint64_t), 1);
@@ -559,6 +588,8 @@ void *nvm_sub_pl_sio_th (void *arg)
 {
     struct nvm_sync_io_arg *ptr = (struct nvm_sync_io_arg *) arg;
     ptr->status = nvm_submit_sync_io(ptr->ch, ptr->cmd, ptr->buf, ptr->cmdtype);
+
+    return NULL;
 }
 
 /**
@@ -679,6 +710,8 @@ static int nvm_ch_config ()
             c++;
         }
     }
+
+    return 0;
 }
 
 static int nvm_ftl_cap_get_bbtbl (struct nvm_ppa_addr *ppa,
@@ -700,14 +733,11 @@ static int nvm_ftl_cap_get_bbtbl (struct nvm_ppa_addr *ppa,
 static int nvm_ftl_cap_set_bbtbl (struct nvm_ppa_addr *ppa,
                                             struct nvm_channel *ch, void **arg)
 {
-    uint32_t *nblk      = (uint32_t *) arg[1];
+    uint8_t *value      = (uint8_t *)  arg[1];
     uint16_t *bb_format = (uint16_t *) arg[2];
 
-    if (*nblk < 1)
-        return -1;
-
     if (ch->ftl->bbtbl_format == *bb_format)
-        return ch->ftl->ops->set_bbtbl(ppa, *nblk);
+        return ch->ftl->ops->set_bbtbl(ppa, *value);
 
     return -1;
 }
@@ -746,10 +776,12 @@ int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
 
             if (narg < 3 || nvm_memcheck(ch->ftl->ops->set_bbtbl))
                 goto OUT;
+
             if (ch->ftl->cap & 1 << FTL_CAP_SET_BBTBL) {
                 if (nvm_ftl_cap_set_bbtbl(ppa, ch, arg)) goto OUT;
                 return 0;
             }
+
             break;
 
         case FTL_CAP_GET_L2PTBL:
@@ -923,7 +955,7 @@ static void nvm_print_log ()
                                   core.nvm_nvme_ctrl->ns_size[0] / NVM_PG_SIZE);
 }
 
-void nvm_jump (int signal) {
+static void nvm_jump (int signal) {
     longjmp (core.jump, 1);
 }
 
