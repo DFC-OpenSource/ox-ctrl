@@ -2,6 +2,10 @@ PLEASE, REFER TO THE WIKI FOR FULL DOCUMENTATION:
 ```
 https://github.com/DFC-OpenSource/ox-ctrl/wiki
 ```
+CHECK RELEASES:
+```
+https://github.com/DFC-OpenSource/ox-ctrl/releases
+```
 
 # OX: Open-Channel SSD Controller
 
