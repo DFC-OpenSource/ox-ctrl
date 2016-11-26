@@ -1,16 +1,3 @@
-PLEASE, REFER TO THE WIKI FOR FULL DOCUMENTATION:
-```
-https://github.com/DFC-OpenSource/ox-ctrl/wiki
-```
-CHECK RELEASES:
-```
-https://github.com/DFC-OpenSource/ox-ctrl/releases
-```
-IF YOU DO NOT HAVE AN OPEN-CHANNEL SSD, YOU CAN USE QEMU WITH AN EMBEDDED OX CONTROLLER:
-```
-https://github.com/DFC-OpenSource/qemu-ox
-```
-
 # OX: Open-Channel SSD Controller
 
 OX is a controller solution for programmable devices like the dragon Fire Card. OX exposes the
@@ -23,13 +10,67 @@ device we may have different channels managed by different FTLs.
 We have implemented a PCIe interconnection handler, a media manager to expose 8
 channels, NVMe and LightNVM support for the DFC.
 
+The repositories cited here are the latest setup tested succesfully with OX. Mix the setup with other sources may result in compatibility problems. 
+
+PLEASE, REFER TO THE WIKI FOR FULL DOCUMENTATION:
+```
+https://github.com/DFC-OpenSource/ox-ctrl/wiki
+```
+CHECK RELEASES:
+```
+https://github.com/DFC-OpenSource/ox-ctrl/releases
+```
+IF YOU DO NOT HAVE AN OPEN-CHANNEL SSD, YOU CAN USE QEMU WITH AN EMBEDDED OX CONTROLLER:
+```
+https://github.com/DFC-OpenSource/qemu-ox
+```
+STABLE KERNEL FOR USER PPA IO THROUGHT LIBLIGHTNVM:
+```
+https://github.com/ivpi/linux-liblnvm
+```
+KERNEL WITH A HOST-BASED FTL FOR OPEN-CHANNEL SSDS (PBLK):
+```
+https://github.com/OpenChannelSSD/linux/tree/pblk.19
+```
+OX-ENABLED NVME LINUX DRIVER:
+```
+https://github.com/ivpi/nvme-driver-DFC
+```
+USER-SPACE LIBRARY FOR OPEN-CHANNEL SSDs (LIBLIGHTNVM):
+```
+https://github.com/ivpi/liblightnvm
+```
+NVME CLIENT FOR OPEN-CHANNEL SSD MANAGEMENT (nvme-cli):
+```
+https://github.com/linux-nvme/nvme-cli
+```
+TOOL FOR TESTING OPEN-CHANNEL SSDs:
+```
+soon...
+```
+SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
+```
+- Install the kernel for user ppa IO;
+- Blacklist the nvme driver (not necessary in QEMU, we use an OX-enabled driver for the DFC);
+- Install liblightnvm;
+- Install nvme-cli;
+- Make sure gennvm module is loaded, if not, load it;
+- Start OX Controller in the DFC (in QEMU it will be already started);
+- Load the NVMe driver (in QEMU it will be already loaded);
+- Check the kernel log, you should see the device registration messages;
+- Initialize the device with nvme-cli: 'sudo nvme lnvm init -d nvme0n1'
+- Check the device with nvme-cli: 'sudo nvme lnvm list', you should see the device with 'gennvm' initialized;
+- Run the tests with the tool (soon...), or use liblightnvm as you wish.
+```
+
+LIMITATIONS:
 ```
 OX DOES NOT HAVE A FTL FOR STANDARD BLOCK DEVICES, FOR NOW OX WORKS ONLY AS OPEN-CHANNEL CONTROLLER.
 OX HAS BEEN DESIGNED TO SUPPORT SEVERAL FTL IMPLEMENTATIONS IN A STANDARD INTERFACE.
 IT IS FUTURE WORK. YOU ARE WELCOME TO CONTRIBUTE.
 ```
 
-This controller supports the FPGA 3.01.00. For FPGA 2.05.01, please go to specific branch.
+This controller supports the FPGA 3.01.00.
 
 The latest stable DFC firmware version:
 
@@ -47,12 +88,6 @@ The latest stable DFC firmware version:
     CPLD_SSD              A02 
     FPGA                  03.01.00
 
-```
-
-Please use the follow NVMe driver with the Linux kernel 4.8:
-
-```
-https://github.com/ivpi/nvme-driver-DFC
 ```
 
 Features:
