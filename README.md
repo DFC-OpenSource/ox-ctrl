@@ -62,6 +62,10 @@ SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
 - Check the device with nvme-cli: 'sudo nvme lnvm list', you should see the device with 'gennvm' initialized;
 - Run the tests with the tool (soon...), or use liblightnvm as you wish.
 ```
+UBUNTU IMAGE WITH THE ENVIRONMENT AND TESTS READY TO RUN:
+```
+soon...
+```
 
 LIMITATIONS:
 ```
