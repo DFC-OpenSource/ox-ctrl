@@ -51,15 +51,27 @@ soon...
 SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
 ```
 - Install the kernel for user ppa IO;
-- Blacklist the nvme driver (not necessary in QEMU, we use an OX-enabled driver for the DFC);
+  - https://github.com/ivpi/linux-liblnvm  
+- Blacklist the nvme driver (not necessary in QEMU. For the DFC, we use an OX-enabled driver);
 - Install liblightnvm;
+  - https://github.com/ivpi/linux-liblnvm
 - Install nvme-cli;
+  - https://github.com/linux-nvme/nvme-cli
 - Make sure gennvm module is loaded, if not, load it;
-- Start OX Controller in the DFC (in QEMU it will be already started);
-- Load the NVMe driver (in QEMU it will be already loaded);
+  $ sudo modprobe gennvm;
+- Start OX Controller in the DFC (in QEMU it will be already started). You have to install OX on the DFC before;
+  In the DFC console:
+  $ ox-ctrl start
+- Build and load the NVMe driver (in QEMU it will be already loaded);
+  - https://github.com/ivpi/nvme-driver-DFC
+  $ sudo insmod <driver_folder>/nvme-core.ko
+  $ sudo insmod <driver_folder>/nvme.ko
 - Check the kernel log, you should see the device registration messages;
-- Initialize the device with nvme-cli: 'sudo nvme lnvm init -d nvme0n1'
-- Check the device with nvme-cli: 'sudo nvme lnvm list', you should see the device with 'gennvm' initialized;
+  $ dmesg
+- Initialize the device with nvme-cli:
+  $ sudo nvme lnvm init -d nvme0n1  
+- Check the device with nvme-cli, you should see the device with 'gennvm' initialized in nvme0n1;
+  $ sudo nvme lnvm list
 - Run the tests with the tool (soon...), or use liblightnvm as you wish.
 ```
 UBUNTU IMAGE WITH THE ENVIRONMENT AND TESTS READY TO RUN:
