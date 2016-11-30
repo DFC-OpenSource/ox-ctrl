@@ -46,7 +46,7 @@ https://github.com/linux-nvme/nvme-cli
 ```
 TOOL FOR TESTING OPEN-CHANNEL SSDs:
 ```
-soon...
+https://github.com/ivpi/fox
 ```
 SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
 ```
