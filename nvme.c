@@ -923,7 +923,7 @@ uint16_t nvme_admin_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     n->stat.tot_num_AdminCmd += 1;
 
     if (core.debug)
-        printf("\n[%d] ADMIN CMD 0x%x, nsid: %d, cid: %d\n",
+        printf("\n[%lu] ADMIN CMD 0x%x, nsid: %d, cid: %d\n",
                    n->stat.tot_num_AdminCmd, cmd->opcode, cmd->nsid, cmd->cid);
 
     req->cmd = cmd;
@@ -988,7 +988,7 @@ uint16_t nvme_io_cmd (NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     n->stat.tot_num_IOCmd += 1;
 
     if (core.debug)
-        printf("\n[%d] IO CMD 0x%x, nsid: %d, cid: %d\n",
+        printf("\n[%lu] IO CMD 0x%x, nsid: %d, cid: %d\n",
                    n->stat.tot_num_IOCmd, cmd->opcode, cmd->nsid, cmd->cid);
 
     req->cmd = cmd;
@@ -1118,6 +1118,14 @@ static void nvme_process_sq (NvmeSQ *sq)
 	status = sq->sqid ?
             nvme_io_cmd (n, &cmd, req) : nvme_admin_cmd (n, &cmd, req);
 
+        /* JUMP */
+    /*    if (sq->sqid) {
+            req->status = NVME_SUCCESS;
+            nvme_enqueue_req_completion (cq, req);
+            goto JUMP;
+        }*/
+        /* JUMP */
+
         if (status != NVME_NO_COMPLETE && status != NVME_SUCCESS) {
             sprintf(err, " [ERROR nvme: cmd 0x%x, with cid: %d returned an "
                            "error status: %x\n", cmd.opcode, cmd.cid, status);
@@ -1132,13 +1140,13 @@ static void nvme_process_sq (NvmeSQ *sq)
         }
 
         /* Enqueue in case of failed IO cmd that hasn't been enqueued */
-	if (status != NVME_NO_COMPLETE && sq->sqid &&
-                req->nvm_io.status.status == NVM_IO_PROCESS ||
-                req->nvm_io.status.status == NVM_IO_NEW) {
+	if ((status != NVME_NO_COMPLETE && sq->sqid) &&
+                (req->nvm_io.status.status == NVM_IO_PROCESS ||
+                req->nvm_io.status.status == NVM_IO_NEW)) {
             req->status = status;
             nvme_enqueue_req_completion (cq, req);
 	}
-
+//JUMP:
 	processed++;
     }
 

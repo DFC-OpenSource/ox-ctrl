@@ -175,7 +175,7 @@ static int nvm_create_ftl_queue (struct nvm_ftl *ftl, uint8_t index)
 
     memcpy(mqname, NVM_FTL_MQ, strlen(NVM_FTL_MQ));
     mqname[strlen(NVM_FTL_MQ)] = '\0';
-    sprintf(mqnb,"%d\0",core.ftl_q_count);
+    sprintf(mqnb,"%d",core.ftl_q_count);
     strcat(mqname, mqnb);
     mq_unlink (mqname);
     struct mq_attr mqAttr = {0, NVM_FTL_MQ_MAXMSG, NVM_FTL_MQ_MSGSIZE, 0};
@@ -810,14 +810,18 @@ static int nvm_init ()
     core.run_flag |= RUN_NVME_ALLOC;
 
     /* media managers */
-#if MMGR_DFCNAND
+#ifdef CONFIG_MMGR_DFCNAND
     ret = mmgr_dfcnand_init();
+    if(ret) goto OUT;
+#endif
+#ifdef CONFIG_MMGR_VOLT
+    ret = mmgr_volt_init();
     if(ret) goto OUT;
 #endif
     core.run_flag |= RUN_MMGR;
 
     /* flash translation layers */
-#if FTL_LNVMFTL
+#ifdef CONFIG_FTL_LNVM
     ret = ftl_lnvm_init();
     if(ret) goto OUT;
 #endif
@@ -949,9 +953,9 @@ static void nvm_print_log ()
                             core.nvm_ch[i]->i.ns_id, core.nvm_ch[i]->i.ns_part,
                             core.nvm_ch[i]->ns_pgs, core.nvm_ch[i]->i.in_use);
     }
-    log_info("  [nvm: namespace size: %llu bytes]\n",
+    log_info("  [nvm: namespace size: %lu bytes]\n",
                                                 core.nvm_nvme_ctrl->ns_size[0]);
-    log_info("    [nvm: total pages: %llu]\n",
+    log_info("    [nvm: total pages: %lu]\n",
                                   core.nvm_nvme_ctrl->ns_size[0] / NVM_PG_SIZE);
 }
 
@@ -973,9 +977,16 @@ int nvm_memcheck (void *mem) {
 
 int nvm_test_unit (struct nvm_init_arg *args)
 {
-    if (core.tests_init->init)
+    if (core.tests_init->init) {
+        core.tests_init->geo.n_blk = LNVM_BLK_LUN;
+        core.tests_init->geo.n_ch =  LNVM_CH;
+        core.tests_init->geo.n_lun = LNVM_LUN_CH;
+        core.tests_init->geo.n_pg =  LNVM_PG_BLK;
+        core.tests_init->geo.n_sec = LNVM_SEC_PG;
+        core.tests_init->geo.n_pl =  LNVM_PLANES;
+        core.tests_init->geo.sec_sz = LNVM_SECSZ;
         return core.tests_init->init(args);
-    else
+    } else
         printf(" Tests are not compiled.\n");
 
     return -1;
@@ -1025,7 +1036,7 @@ int nvm_init_ctrl (int argc, char **argv)
             break;
         case OX_RUN_MODE:
             core.run_flag ^= RUN_TESTS;
-            while(1) { usleep(1); } break;
+            while(1) { usleep(NVM_SEC); } break;
         default:
             goto CLEAN;
     }
@@ -1046,9 +1057,7 @@ OUT:
     return 0;
 }
 
-#if INIT_DFC
 int main (int argc, char **argv)
 {
     return nvm_init_ctrl (argc, argv);
 }
-#endif /* INIT_DFC */

@@ -40,6 +40,7 @@
 #include <time.h>
 
 extern struct core_struct core;
+extern struct tests_init_st tests_is;
 pthread_t               *threads;
 static int              thread_err;
 static void             ***wbuf;
@@ -78,7 +79,7 @@ static void test_s01_print_result (int n_pgs, uint8_t cmdtype, uint64_t usec)
 int test_s01_compare_page_by_page_sync (int total_pgs)
 {
     int ret, pg_i, pl_i, i;
-    int n_pl = TESTS_PLANES, n_pgs = 0;
+    int n_pl = tests_is.geo.n_pl, n_pgs = 0;
     struct nvm_channel *ch;
     int pg_sz = (NVM_PG_SIZE + NVM_OOB_SIZE);
     int pl_pg = pg_sz * n_pl;
@@ -200,7 +201,7 @@ OUT:
 int test_s01_compare_data_sync (int total_pgs)
 {
     int ret, pg_i, pl_i, i;
-    int n_pl = TESTS_PLANES, n_pgs = 0;
+    int n_pl = tests_is.geo.n_pl, n_pgs = 0;
     struct nvm_channel *ch;
     int pg_sz = (NVM_PG_SIZE + NVM_OOB_SIZE);
     int pl_pg = pg_sz * n_pl;
@@ -322,7 +323,7 @@ OUT:
 int test_s01_full_blks_sync (uint8_t cmdtype)
 {
     int ret, ch_i, pg_i, pl_i, i, match = 0;
-    int total_pgs = TESTS_PGS, n_pl = TESTS_PLANES, n_pgs = 0;
+    int total_pgs = tests_is.geo.n_pg, n_pl = tests_is.geo.n_pl, n_pgs = 0;
     struct nvm_channel *ch;
     struct timeval start, end;
     struct nvm_mmgr_io_cmd cmd[n_pl];
@@ -469,7 +470,7 @@ static void *tests_io_thread (void *arg)
 int test_s01_io_thread (uint8_t cmdtype, int total_pgs)
 {
     int ch_i, pg_i, n_th = 0, match;
-    int n_pl = TESTS_PLANES, n_pgs = 0;
+    int n_pl = tests_is.geo.n_pl, n_pgs = 0;
     struct nvm_channel *ch;
     struct tests_sync_io sync_args[core.nvm_ch_count];
     struct nvm_mmgr_io_cmd cmd[core.nvm_ch_count][n_pl];
@@ -588,7 +589,7 @@ ERASE:
 
 int test_s01_compare_data_sync_fn (struct tests_test *test)
 {
-    return test_s01_compare_data_sync(TESTS_PGS);
+    return test_s01_compare_data_sync(tests_is.geo.n_pg);
 }
 
 int test_s01_read_full_blks_sync_fn (struct tests_test *test)
@@ -608,17 +609,17 @@ int test_s01_erase_full_blks_sync_fn (struct tests_test *test)
 
 int test_s01_read_full_blks_thread_fn (struct tests_test *test)
 {
-    return test_s01_io_thread (MMGR_READ_PG, TESTS_PGS);
+    return test_s01_io_thread (MMGR_READ_PG, tests_is.geo.n_pg);
 }
 
 int test_s01_write_full_blks_thread_fn (struct tests_test *test)
 {
-    return test_s01_io_thread (MMGR_WRITE_PG, TESTS_PGS);
+    return test_s01_io_thread (MMGR_WRITE_PG, tests_is.geo.n_pg);
 }
 
 int test_s01_erase_full_blks_thread_fn (struct tests_test *test)
 {
-    return test_s01_io_thread (MMGR_ERASE_BLK, TESTS_PGS);
+    return test_s01_io_thread (MMGR_ERASE_BLK, tests_is.geo.n_pg);
 }
 
 int test_s01_read_single_page_thread_fn (struct tests_test *test)
@@ -747,10 +748,10 @@ int testset_mmgr_dfcnand_init (struct nvm_init_arg *args) {
             return -1;
     }
 
-    rand_lun[0] = rand() % TESTS_LUNS;
-    rand_blk[0] = (rand() % TESTS_BLKS) + 10;
-    rand_lun[1] = rand() % TESTS_LUNS;
-    rand_blk[1] = (rand() % TESTS_BLKS) + 10;
+    rand_lun[0] = rand() % tests_is.geo.n_lun;
+    rand_blk[0] = (rand() % tests_is.geo.n_blk) + 4;
+    rand_lun[1] = rand() % tests_is.geo.n_lun;
+    rand_blk[1] = (rand() % tests_is.geo.n_blk) + 4;
 
     if (args->arg_flag & CMDARG_FLAG_A || args->arg_flag & CMDARG_FLAG_S) {
         printf("\n[MMGR_TESTS: random lun: %d, random blk: %d]\n",

@@ -3,19 +3,13 @@
 
 #include "ssd.h"
 #include "nvme.h"
+#include "lightnvm.h"
 
 #define TEST_FLAG_SUCCESS   0x1
 #define TEST_FLAG_QUEUED    0x2
 
 #define TEST_SUCCESS        TEST_FLAG_SUCCESS
 #define TEST_FAIL           0x0
-
-#define TESTS_LUNS      4
-#define TESTS_PLANES    2
-#define TESTS_BLKS      1014
-#define TESTS_PGS       512
-#define TESTS_SEC_SZ    0x1000
-#define TESTS_SEC_PG    4
 
 struct tests_test;
 

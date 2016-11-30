@@ -38,9 +38,6 @@
 #endif
 
 #define LIGHTNVM            1
-#define INIT_DFC            1
-#define MMGR_DFCNAND        1
-#define FTL_LNVMFTL         1
 
 #include <sys/queue.h>
 #include <stdint.h>
@@ -68,6 +65,7 @@
 
 #define AND64                  0xffffffffffffffff
 #define ZERO_32FLAG            0x00000000
+#define NVM_SEC                (1000000 & AND64)
 
 #define NVM_CH_IN_USE          0x3c
 
@@ -337,6 +335,16 @@ struct nvm_channel {
     };
 };
 
+struct nvm_gengeo {
+    uint16_t    n_ch;
+    uint16_t    n_lun;
+    uint16_t    n_blk;
+    uint16_t    n_pg;
+    uint16_t    n_pl;
+    uint16_t    n_sec;
+    uint16_t    sec_sz;
+};
+
 #define CMDARG_LEN          32
 #define CMDARG_FLAG_A       (1 << 0)
 #define CMDARG_FLAG_S       (1 << 1)
@@ -371,6 +379,7 @@ struct tests_init_st {
     tests_start_fn          *start;
     tests_admin_fn          *admin;
     tests_complete_io_fn    *complete_io;
+    struct nvm_gengeo       geo;
 };
 
 struct nvm_sync_io_arg {
@@ -416,10 +425,11 @@ int  nvm_submit_multi_plane_sync_io (struct nvm_channel *,
                           struct nvm_mmgr_io_cmd *, void *, uint8_t, uint64_t);
 
 /* media managers init function */
-int mmgr_dfcnand_init();
+int mmgr_dfcnand_init(void);
+int mmgr_volt_init(void);
 
 /* FTLs init function */
-int ftl_lnvm_init();
+int ftl_lnvm_init(void);
 
 /* nvme functions */
 int  nvme_init(struct NvmeCtrl *);
@@ -432,7 +442,7 @@ uint16_t nvme_admin_cmd (struct NvmeCtrl *, struct NvmeCmd *,
 uint16_t nvme_io_cmd (struct NvmeCtrl *, struct NvmeCmd *,struct NvmeRequest *);
 
 /* pcie handler init function */
-int dfcpcie_init();
+int dfcpcie_init(void);
 
 /* console command parser init function */
 int cmdarg_init (int, char **);
