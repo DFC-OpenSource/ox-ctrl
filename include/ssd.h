@@ -43,6 +43,7 @@
 #include <stdint.h>
 #include <pthread.h>
 #include <setjmp.h>
+#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
 #include <stdlib.h>

@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <pthread.h>
+#include "../../include/ox-mq.h"
 
 #define VOLT_MEM_ERROR      0
 #define VOLT_MEM_OK         1
@@ -30,8 +31,7 @@
 #define VOLT_WRITE_TIME     200
 #define VOLT_ERASE_TIME     1200
 
-#define VOLT_MQ_MAXMSG      64
-#define VOLT_MQ_MSGSIZE     8
+#define VOLT_QUEUE_SIZE     16
 
 typedef struct VoltStatus {
     uint8_t     ready; /* 0x00-busy, 0x01-ready to use */
@@ -64,8 +64,7 @@ typedef struct VoltCtrl {
     VoltBlock       *blocks;
     VoltLun         *luns;
     VoltCh          *channels;
-    int16_t         mq_id;
-    pthread_t       io_thread;
+    struct ox_mq    *mq;
 } VoltCtrl;
 
 struct volt_dma {
