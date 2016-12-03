@@ -30,6 +30,7 @@
  */
 
 #include <time.h>
+#include <string.h>
 #include "../include/ssd.h"
 #include "../include/tests.h"
 #include "../include/nvme.h"
@@ -550,9 +551,9 @@ int testset_lnvm_init (struct nvm_init_arg *args) {
     }
 
     rand_lun[2] = rand() % tests_is.geo.n_lun;
-    rand_blk[2] = (rand() % tests_is.geo.n_blk) + 4;
+    rand_blk[2] = (rand() % (tests_is.geo.n_blk - 4)) + 4;
     rand_lun[3] = rand() % tests_is.geo.n_lun;
-    rand_blk[3] = (rand() % tests_is.geo.n_blk) + 4;
+    rand_blk[3] = (rand() % (tests_is.geo.n_blk - 4)) + 4;
 
     if (args->arg_flag & CMDARG_FLAG_A || args->arg_flag & CMDARG_FLAG_S) {
         printf("[LIGHTNVM_TESTS: random lun: %d, random blk: %d]\n",

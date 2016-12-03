@@ -749,9 +749,9 @@ int testset_mmgr_dfcnand_init (struct nvm_init_arg *args) {
     }
 
     rand_lun[0] = rand() % tests_is.geo.n_lun;
-    rand_blk[0] = (rand() % tests_is.geo.n_blk) + 4;
+    rand_blk[0] = (rand() % (tests_is.geo.n_blk - 4)) + 4;
     rand_lun[1] = rand() % tests_is.geo.n_lun;
-    rand_blk[1] = (rand() % tests_is.geo.n_blk) + 4;
+    rand_blk[1] = (rand() % (tests_is.geo.n_blk - 4)) + 4;
 
     if (args->arg_flag & CMDARG_FLAG_A || args->arg_flag & CMDARG_FLAG_S) {
         printf("\n[MMGR_TESTS: random lun: %d, random blk: %d]\n",
