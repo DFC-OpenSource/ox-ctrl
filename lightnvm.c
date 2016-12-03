@@ -287,9 +287,9 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         lnvm_debug_print_io (req->nvm_io.ppalist, req->nvm_io.prp,
                                                 req->nvm_io.md_prp, nlb, 0, 0);
 
-    /* JUMP */
-    //return 0;
-    /* JUMP */
+    /* NULL IO */
+    if (core.null)
+        return 0;
 
     return nvm_submit_io(&req->nvm_io);
 }
@@ -414,9 +414,9 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
         lnvm_debug_print_io (req->nvm_io.ppalist, req->nvm_io.prp,
                                 req->nvm_io.md_prp, nlb, data_size, meta_size);
 
-    /* JUMP */
-    //return 0;
-    /* JUMP */
+    /* NULL IO */
+    if (core.null)
+        return 0;
 
     return nvm_submit_io(&req->nvm_io);
 }

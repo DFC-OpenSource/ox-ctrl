@@ -111,7 +111,7 @@ static inline int pcie_uio_read_int (ssize_t *nb, int fd, uint32_t *int_no) {
 void *dfcpcie_req_processor (void *arg)
 {
     struct pci_ctrl *pci = (struct pci_ctrl *) arg;
-    struct timeval  def_time = {0, 100}, timeout = {0, 100};
+    struct timeval  def_time = {0, 10}, timeout = {0, 10};
     NvmeCtrl        *n = core.nvm_nvme_ctrl;
     uint32_t        *fifo_count_ptr = pci->fifo_count;
     ssize_t         nb;

@@ -400,6 +400,7 @@ struct core_struct {
     jmp_buf                 jump;
     uint8_t                 run_flag;
     uint8_t                 debug;
+    uint8_t                 null;
     struct nvm_pcie         *nvm_pcie;
     struct nvm_channel      **nvm_ch;
     struct NvmeCtrl         *nvm_nvme_ctrl;

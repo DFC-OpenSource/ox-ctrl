@@ -1118,13 +1118,14 @@ static void nvme_process_sq (NvmeSQ *sq)
 	status = sq->sqid ?
             nvme_io_cmd (n, &cmd, req) : nvme_admin_cmd (n, &cmd, req);
 
-        /* JUMP */
-    /*    if (sq->sqid) {
-            req->status = NVME_SUCCESS;
-            nvme_enqueue_req_completion (cq, req);
-            goto JUMP;
-        }*/
-        /* JUMP */
+        /* NULL IO */
+        if (core.null) {
+            if (sq->sqid) {
+                req->status = NVME_SUCCESS;
+                nvme_enqueue_req_completion (cq, req);
+                goto JUMP;
+            }
+        }
 
         if (status != NVME_NO_COMPLETE && status != NVME_SUCCESS) {
             sprintf(err, " [ERROR nvme: cmd 0x%x, with cid: %d returned an "
@@ -1146,7 +1147,7 @@ static void nvme_process_sq (NvmeSQ *sq)
             req->status = status;
             nvme_enqueue_req_completion (cq, req);
 	}
-//JUMP:
+JUMP:
 	processed++;
     }
 

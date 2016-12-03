@@ -43,7 +43,9 @@ enum cmdtypes {
     CMDARG_START = 1,
     CMDARG_TEST,
     CMDARG_DEBUG,
-    CMDARG_ADMIN
+    CMDARG_ADMIN,
+    CMDARG_NULL,
+    CMDARG_NULL_DEBUG
 };
 
 static char doc_global[] = "\n*** OX Controller v1.1***\n"
@@ -51,6 +53,8 @@ static char doc_global[] = "\n*** OX Controller v1.1***\n"
         " Available commands:\n"
         "  start            Start controller with standard configuration\n"
         "  debug            Start controller and print Admin/IO commands\n"
+        "  null             Start controller with Null IOs (NVMe queue tests)\n"
+        "  null-debug       Null IOs and print Admin/IO commands\n"
         "  test             Start controller, run tests and close\n"
         "  admin            Execute specific tasks within the controller\n"
         " \n Initial release developed by Ivan L. Picoli, the red-eagle\n\n";
@@ -211,6 +215,10 @@ error_t parse_opt (int key, char *arg, struct argp_state *state)
                 args->cmdtype = CMDARG_START;
             else if (strcmp(arg, "debug") == 0)
                 args->cmdtype = CMDARG_DEBUG;
+            else if (strcmp(arg, "null") == 0)
+                args->cmdtype = CMDARG_NULL;
+            else if (strcmp(arg, "null-debug") == 0)
+                args->cmdtype = CMDARG_NULL_DEBUG;
             else if (strcmp(arg, "test") == 0){
                 args->cmdtype = CMDARG_TEST;
                 cmd_prepare(state, args, "test", &argp_test);
@@ -243,6 +251,13 @@ int cmdarg_init (int argc, char **argv)
             return OX_RUN_MODE;
         case CMDARG_DEBUG:
             core.debug |= 1 << 0;
+            return OX_RUN_MODE;
+        case CMDARG_NULL:
+            core.null |= 1 << 0;
+            return OX_RUN_MODE;
+        case CMDARG_NULL_DEBUG:
+            core.debug |= 1 << 0;
+            core.null |= 1 << 0;
             return OX_RUN_MODE;
         case CMDARG_TEST:
             ret = nvm_test_unit(core.args_global);
