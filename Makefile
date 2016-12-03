@@ -3,8 +3,8 @@
 NAME = ox-ctrl       # DFC with DFCNAND
 NAMET = ox-ctrl-test # DFC with DFCNAND + tests
 NAMEV = ox-ctrl-volt # DFC with VOLT + tests
-CORE = core.o nvme.o nvme_cmd.o lightnvm.o cmd_args.o
-CORE_VOLT = core-v.o nvme-v.o nvme_cmd-v.o lightnvm-v.o cmd_args-v.o
+CORE = core.o ox-mq.o nvme.o nvme_cmd.o lightnvm.o cmd_args.o
+CORE_VOLT = core-v.o ox-mq-v.o nvme-v.o nvme_cmd-v.o lightnvm-v.o cmd_args-v.o
 CLEAN = *.o *-v.o
 
 ### CONFIGURATION MACROS
@@ -67,7 +67,7 @@ CLEAN += $(TESTS_DFC_PATH)/*.o
 #CC = #For yocto project CC comes from Yocto Makefile
 CFLAGS = -g -lrt
 CFLAGSXX = -pg -fPIC -shared -c -o
-DEPS = include/ssd.h include/nvme.h include/lightnvm.h
+DEPS = include/ssd.h include/nvme.h include/lightnvm.h include/ox-mq.h
 
 ### CORE
 # ox-ctrl and ox-ctrl-test
