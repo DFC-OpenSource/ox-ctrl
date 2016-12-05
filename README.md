@@ -7,10 +7,7 @@ buffering or ECC) or a full-fledged FTL. FTLs are registered within the OX core,
 enabling applications to select channels to be managed by a specific FTL. Within a
 device we may have different channels managed by different FTLs.
 
-We have implemented a PCIe interconnection handler, a media manager to expose 8
-channels, NVMe and LightNVM support for the DFC.
-
-The repositories cited here are the latest setup tested succesfully with OX. Mix the setup with other sources may result in compatibility problems. 
+The repositories cited here are the latest setup tested succesfully with OX. Once direct I/O support to physical Open-Channel SSDs in the Linux kernel is a work-in-progress task, mix the setup with other sources may result in compatibility problems.
 
 PLEASE, REFER TO THE WIKI FOR FULL DOCUMENTATION:
 ```
@@ -81,7 +78,7 @@ soon...
 
 LIMITATIONS:
 ```
-OX DOES NOT HAVE A FTL FOR STANDARD BLOCK DEVICES, FOR NOW OX WORKS ONLY AS OPEN-CHANNEL CONTROLLER.
+OX DOES NOT HAVE A FTL FOR STANDARD BLOCK DEVICES, BUT IT HAS THE CAPABILITIES FOR IT. FOR NOW OX WORKS ONLY AS OPEN-CHANNEL CONTROLLER.
 OX HAS BEEN DESIGNED TO SUPPORT SEVERAL FTL IMPLEMENTATIONS IN A STANDARD INTERFACE.
 IT IS FUTURE WORK. YOU ARE WELCOME TO CONTRIBUTE.
 ```
@@ -105,7 +102,10 @@ The latest stable DFC firmware version:
     FPGA                  03.01.00
 
 ```
-
+The latest DFC hardware configuration:
+```
+2 NAND DIMM modules installed in the slots M1 and M3 of the storage card.
+```
 Features:
 
 ```
@@ -140,6 +140,7 @@ Features:
     bindings between channels and FTLs. It means that inside a device we can 
     have different channels managed by different FTLs.
 ```
+We have implemented a PCIe interconnection handler, a media manager to expose 8 channels, NVMe and LightNVM support for the DFC.
 
 HOW TO INSTALL AND USE:
 
