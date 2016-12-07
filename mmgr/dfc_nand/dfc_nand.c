@@ -52,8 +52,8 @@ static uint16_t dfcnand_vir_to_phy_lun (uint16_t vir){
     if (vir == 0)
         return 0;
 
-    tgt = vir / lunc;
-    lun = vir % lunc;
+    lun = vir / lunc;
+    tgt = vir % lunc;
 
     return tgt << 8 | lun;
 }

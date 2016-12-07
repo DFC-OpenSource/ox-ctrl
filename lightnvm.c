@@ -43,6 +43,7 @@
 #include "include/uatomic.h"
 
 extern struct core_struct core;
+uint16_t blk;
 
 uint8_t lnvm_dev(NvmeCtrl *n)
 {
@@ -54,7 +55,7 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
 {
     int i;
     printf(" Number of sectors: %d\n", size);
-    printf(" DMA size: %llu (data) + %llu (meta) = %llu bytes\n",
+    printf(" DMA size: %lu (data) + %lu (meta) = %lu bytes\n",
                                                  dt_sz, md_sz, dt_sz + md_sz);
     for (i = 0; i < size; i++) {
         printf (" [ppa(%d): ch: %d, lun: %d, blk: %d, pl: %d, pg: %d, "
@@ -62,8 +63,8 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
                 list[i].g.pl, list[i].g.pg, list[i].g.sec);
     }
     for (i = 0; i < size; i++)
-        printf (" [prp(%d): 0x%016x\n", i, prp[i]);
-    printf (" [meta_prp(0): 0x%016x\n", md_prp[0]);
+        printf (" [prp(%d): 0x%016lx\n", i, prp[i]);
+    printf (" [meta_prp(0): 0x%016lx\n", md_prp[0]);
 }
 
 void lnvm_set_default(LnvmCtrl *ctrl)
@@ -80,6 +81,7 @@ void lnvm_set_default(LnvmCtrl *ctrl)
     ctrl->params.num_ch = LNVM_CH;
     ctrl->params.num_lun = LNVM_LUN_CH;
     ctrl->params.num_pln = LNVM_PLANES;
+    /*ctrl->params.num_blk*/blk = LNVM_BLK_LUN;
     ctrl->bb_gen_freq = LNVM_BB_GEN_FREQ;
     ctrl->err_write = LNVM_ERR_WRITE;
 }
@@ -285,7 +287,11 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         lnvm_debug_print_io (req->nvm_io.ppalist, req->nvm_io.prp,
                                                 req->nvm_io.md_prp, nlb, 0, 0);
 
-    return nvm_submit_io(&req->nvm_io);
+    /* NULL IO */
+    if (core.null)
+        return 0;
+
+    return nvm_submit_ftl(&req->nvm_io);
 }
 
 static inline uint64_t nvme_gen_to_dev_addr(LnvmCtrl *ln,struct nvm_ppa_addr *r)
@@ -408,12 +414,17 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
         lnvm_debug_print_io (req->nvm_io.ppalist, req->nvm_io.prp,
                                 req->nvm_io.md_prp, nlb, data_size, meta_size);
 
-    return nvm_submit_io(&req->nvm_io);
+    /* NULL IO */
+    if (core.null)
+        return 0;
+
+    return nvm_submit_ftl(&req->nvm_io);
 }
 
 static int lightnvm_flush_tbls(NvmeCtrl *n)
 {
     /* TODO */
+    return 0;
 }
 
 void lnvm_init_id_ctrl(LnvmIdCtrl *ln_id)
@@ -444,6 +455,7 @@ uint16_t lnvm_identity(NvmeCtrl *n, NvmeCmd *cmd)
     uint64_t prp1 = c->prp1;
 
     LnvmIdCtrl *id = &n->lightnvm_ctrl.id_ctrl;
+
     if (prp1)
         return nvme_write_to_host(id, prp1, sizeof (LnvmIdCtrl));
 
@@ -486,7 +498,7 @@ int lnvm_init(NvmeCtrl *n)
         c->num_ch = ln->params.num_ch;
         c->num_lun = ln->params.num_lun;
         c->num_pln = ln->params.num_pln;
-        c->num_blk = tot_blks / (c->num_lun * c->num_ch);
+        c->num_blk = blk;//ln->params.num_blk;
         c->num_pg = ln->params.pgs_per_blk;
         c->csecs = ln->params.sec_size;
         c->fpg_sz = ln->params.sec_size * ln->params.secs_per_pg;
@@ -529,16 +541,16 @@ int lnvm_init(NvmeCtrl *n)
     log_info("    [lnvm: Blocks per LUN: %d]\n",c->num_blk);
     log_info("    [lnvm: Pages per Block: %d]\n",c->num_pg);
     log_info("    [lnvm: Planes: %d]\n",c->num_pln);
-    log_info("    [lnvm: Total Blocks: %d]\n", tot_blks);
-    log_info("    [lnvm: Reserved/Bad Blocks: %d]\n", rsv_blks);
-    log_info("    [lnvm: Total Pages: %d]\n",c->num_pg * tot_blks
+    log_info("    [lnvm: Total Blocks: %lu]\n", tot_blks);
+    log_info("    [lnvm: Reserved/Bad Blocks: %lu]\n", rsv_blks);
+    log_info("    [lnvm: Total Pages: %lu]\n",c->num_pg * tot_blks
                                                                 * c->num_pln);
     log_info("    [lnvm: Page size: %d bytes]\n",c->fpg_sz);
     log_info("    [lnvm: Plane Page size: %d bytes]\n",c->fpg_sz
                                                                 * c->num_pln);
-    log_info("    [lnvm: Total: %llu MB]\n",(((c->fpg_sz & 0xffffffff)
+    log_info("    [lnvm: Total: %lu MB]\n",(((c->fpg_sz & 0xffffffff)
                           / 1024) * c->num_pg * c->num_pln * tot_blks) / 1024);
-    log_info("    [lnvm: Total Available: %llu MB]\n",
+    log_info("    [lnvm: Total Available: %lu MB]\n",
                   (((c->fpg_sz & 0xffffffff) / 1024) * c->num_pg * c->num_pln *
                   (tot_blks - rsv_blks)) / 1024);
 

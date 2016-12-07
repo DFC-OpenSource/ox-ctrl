@@ -4,13 +4,14 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define LNVM_SECSZ          0x1000
-#define LNVM_SEC_OOBSZ      0x100
-#define LNVM_SEC_PG         4
-#define LNVM_PG_BLK         512
-#define LNVM_CH             8
-#define LNVM_LUN_CH         4
-#define LNVM_PLANES         2
+#define LNVM_SECSZ          CONFIG_LNVM_SECSZ
+#define LNVM_SEC_OOBSZ      CONFIG_LNVM_SEC_OOBSZ
+#define LNVM_SEC_PG         CONFIG_LNVM_SEC_PG
+#define LNVM_PG_BLK         CONFIG_LNVM_PG_BLK
+#define LNVM_CH             CONFIG_LNVM_CH
+#define LNVM_LUN_CH         CONFIG_LNVM_LUN_CH
+#define LNVM_BLK_LUN        CONFIG_LNVM_BLK_LUN
+#define LNVM_PLANES         CONFIG_LNVM_PLANES
 #define LNVM_PG_SIZE        (LNVM_SECSZ * LNVM_SEC_PG)
 #define LNVM_PL_PG_SIZE     (LNVM_SECSZ * LNVM_SEC_PG * LNVM_PLANES)
 #define LNVM_SEC_PL_PG      (LNVM_SEC_PG * LNVM_PLANES)
@@ -121,6 +122,7 @@ typedef struct LnvmParams {
     uint8_t     num_ch;
     uint8_t     num_pln;
     uint8_t     num_lun;
+    //uint16_t    num_blk;
     /* calculated values */
     uint32_t    sec_per_phys_pl;
     uint32_t    sec_per_log_pl;

@@ -38,23 +38,22 @@
 #endif
 
 #define LIGHTNVM            1
-#define INIT_DFC            1
-#define MMGR_DFCNAND        1
-#define FTL_LNVMFTL         1
 
 #include <sys/queue.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <setjmp.h>
+#include <syslog.h>
 #include <time.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include "uatomic.h"
 
 #define MAX_NAME_SIZE           31
-#define NVM_FTL_MQ             "/nvm_mq"
-#define NVM_FTL_MQ_MSGSIZE     8
-#define NVM_FTL_MQ_MAXMSG      64
+#define NVM_QUEUE_RETRY         16
+#define NVM_QUEUE_RETRY_SLEEP   500
+#define NVM_FTL_QUEUE_SIZE      64
+#define NVM_FTL_QUEUE_TO        100000
 
 #define NVM_SYNCIO_TO          10
 #define NVM_SYNCIO_FLAG_BUF    0x1
@@ -68,6 +67,7 @@
 
 #define AND64                  0xffffffffffffffff
 #define ZERO_32FLAG            0x00000000
+#define NVM_SEC                (1000000 & AND64)
 
 #define NVM_CH_IN_USE          0x3c
 
@@ -140,6 +140,7 @@ struct nvm_io_cmd {
     struct nvm_io_status        status;
     struct nvm_mmgr_io_cmd      mmgr_io[64];
     void                        *req;
+    void                        *mq_req;
     uint64_t                    prp[64];
     uint64_t                    md_prp[64];
     uint32_t                    sec_sz;
@@ -298,15 +299,12 @@ struct nvm_ftl_ops {
 
 struct nvm_ftl {
     uint16_t                ftl_id;
-    char                    *name;
+    const char              *name;
     struct nvm_ftl_ops      *ops;
     uint32_t                cap; /* Capability bits */
     uint16_t                bbtbl_format;
     uint8_t                 nq; /* Number of queues/threads, up to 64 per FTL */
-    uint16_t                mq_id[64];
-    pthread_t               io_thread[64];
-    uint8_t                 last_q;
-    pthread_mutex_t         q_mutex;
+    struct ox_mq            *mq;
     uint8_t                 active;
     LIST_ENTRY(nvm_ftl)     entry;
 };
@@ -335,6 +333,16 @@ struct nvm_channel {
         } i;
         uint64_t       nvm_info;
     };
+};
+
+struct nvm_gengeo {
+    uint16_t    n_ch;
+    uint16_t    n_lun;
+    uint16_t    n_blk;
+    uint16_t    n_pg;
+    uint16_t    n_pl;
+    uint16_t    n_sec;
+    uint16_t    sec_sz;
 };
 
 #define CMDARG_LEN          32
@@ -371,6 +379,7 @@ struct tests_init_st {
     tests_start_fn          *start;
     tests_admin_fn          *admin;
     tests_complete_io_fn    *complete_io;
+    struct nvm_gengeo       geo;
 };
 
 struct nvm_sync_io_arg {
@@ -390,6 +399,7 @@ struct core_struct {
     jmp_buf                 jump;
     uint8_t                 run_flag;
     uint8_t                 debug;
+    uint8_t                 null;
     struct nvm_pcie         *nvm_pcie;
     struct nvm_channel      **nvm_ch;
     struct NvmeCtrl         *nvm_nvme_ctrl;
@@ -401,10 +411,10 @@ struct core_struct {
 int  nvm_register_mmgr(struct nvm_mmgr *);
 int  nvm_register_pcie_handler(struct nvm_pcie *);
 int  nvm_register_ftl (struct nvm_ftl *);
-int  nvm_submit_io (struct nvm_io_cmd *);
-int  nvm_submit_mmgr_io (struct nvm_mmgr_io_cmd *);
+int  nvm_submit_ftl (struct nvm_io_cmd *);
+int  nvm_submit_mmgr (struct nvm_mmgr_io_cmd *);
+void nvm_complete_ftl (struct nvm_io_cmd *);
 void nvm_callback (struct nvm_mmgr_io_cmd *);
-void nvm_complete_io (struct nvm_io_cmd *);
 int  nvm_dma (void *, uint64_t, ssize_t, uint8_t);
 int  nvm_memcheck (void *);
 int  nvm_ftl_cap_exec (uint8_t, void **, int);
@@ -416,10 +426,11 @@ int  nvm_submit_multi_plane_sync_io (struct nvm_channel *,
                           struct nvm_mmgr_io_cmd *, void *, uint8_t, uint64_t);
 
 /* media managers init function */
-int mmgr_dfcnand_init();
+int mmgr_dfcnand_init(void);
+int mmgr_volt_init(void);
 
 /* FTLs init function */
-int ftl_lnvm_init();
+int ftl_lnvm_init(void);
 
 /* nvme functions */
 int  nvme_init(struct NvmeCtrl *);
@@ -432,7 +443,7 @@ uint16_t nvme_admin_cmd (struct NvmeCtrl *, struct NvmeCmd *,
 uint16_t nvme_io_cmd (struct NvmeCtrl *, struct NvmeCmd *,struct NvmeRequest *);
 
 /* pcie handler init function */
-int dfcpcie_init();
+int dfcpcie_init(void);
 
 /* console command parser init function */
 int cmdarg_init (int, char **);

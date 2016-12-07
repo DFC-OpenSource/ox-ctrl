@@ -55,6 +55,8 @@
  *    possible to set the device as NVMe or LightNVM (OpenChannel device).
  */
 
+#include "include/ssd.h"
+
 #include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
@@ -68,8 +70,8 @@
 #include <setjmp.h>
 #include <argp.h>
 #include <time.h>
-#include "include/ssd.h"
 #include "include/uatomic.h"
+#include "include/ox-mq.h"
 
 LIST_HEAD(mmgr_list, nvm_mmgr) mmgr_head = LIST_HEAD_INITIALIZER(mmgr_head);
 LIST_HEAD(ftl_list, nvm_ftl) ftl_head = LIST_HEAD_INITIALIZER(ftl_head);
@@ -125,96 +127,102 @@ static struct nvm_ftl *nvm_get_ftl_instance(uint16_t ftl_id)
     return NULL;
 }
 
-static uint8_t nvm_ftl_q_schedule (struct nvm_ftl *ftl) {
-    uint8_t q;
-    pthread_mutex_lock(&ftl->q_mutex);
-    q = ftl->last_q = (ftl->last_q + 1 >= ftl->nq) ? 0 : ftl->last_q + 1;
-    pthread_mutex_unlock(&ftl->q_mutex);
-    return q;
+static uint16_t nvm_ftl_q_schedule (struct nvm_ftl *ftl, struct nvm_io_cmd *cmd)
+{
+    return cmd->channel->ch_id % ftl->nq;
 }
 
-void *nvm_ftl_io_thread (void *arg)
+static void nvm_complete_to_host (struct nvm_io_cmd *cmd)
 {
-    struct nvm_ftl *ftl = (struct nvm_ftl *) arg;
-    struct nvm_io_cmd *cmd;
-    uint64_t *cmd_addr;
-    int ret, q_id;
+    NvmeRequest *req = (NvmeRequest *) cmd->req;
 
-    q_id = nvm_ftl_q_schedule (ftl);
+    req->status = (cmd->status.status == NVM_IO_SUCCESS) ?
+                NVME_SUCCESS : (cmd->status.nvme_status) ?
+                      cmd->status.nvme_status : NVME_INTERNAL_DEV_ERROR;
+
+    if (core.debug)
+        printf(" [NVMe cmd 0x%x. cid: %d completed. Status: %x]\n",
+                                   req->cmd.opcode, req->cmd.cid, req->status);
+
+    ((core.run_flag & RUN_TESTS) && core.tests_init->complete_io) ?
+        core.tests_init->complete_io(req) : nvme_rw_cb(req);
+}
+
+void nvm_complete_ftl (struct nvm_io_cmd *cmd)
+{
+    int retry, ret;
+    struct ox_mq_entry *req = (struct ox_mq_entry *) cmd->mq_req;
+
+    retry = NVM_QUEUE_RETRY;
     do {
-        cmd = 0;
-        ret = mq_receive (ftl->mq_id[q_id], (char *)&cmd_addr,
-                                                      sizeof (uint64_t), NULL);
-        if (ret != NVM_FTL_MQ_MSGSIZE)
-            continue;
-
-        cmd = (struct nvm_io_cmd *) cmd_addr;
-	if(cmd == NULL)
-            continue;
-
-        ret = ftl->ops->submit_io(cmd);
-
+        ret = ox_mq_complete_req(cmd->channel->ftl->mq, req);
         if (ret) {
-            log_err ("[ERROR: Cmd %x not completed. Aborted.]\n", cmd->cmdtype);
-            nvm_complete_io(cmd);
+            retry--;
+            usleep (NVM_QUEUE_RETRY_SLEEP);
         }
-
-    } while (ftl->active);
-
-    log_info("  [ftl: IO thread (%s)(%d) killed.]\n", ftl->name, q_id);
-
-    return NULL;
+    } while (ret && retry);
 }
 
-static int nvm_create_ftl_queue (struct nvm_ftl *ftl, uint8_t index)
+static void nvm_ftl_process_sq (struct ox_mq_entry *req)
 {
-    char *mqname = (char *) malloc(strlen(NVM_FTL_MQ)+4);
-    char *mqnb = (char *) malloc(3);
-    if (!mqname || !mqnb)
-        return EMEM;
+    struct nvm_io_cmd *cmd = (struct nvm_io_cmd *) req->opaque;
+    struct nvm_ftl *ftl = cmd->channel->ftl;
+    int ret;
 
-    memcpy(mqname, NVM_FTL_MQ, strlen(NVM_FTL_MQ));
-    mqname[strlen(NVM_FTL_MQ)] = '\0';
-    sprintf(mqnb,"%d\0",core.ftl_q_count);
-    strcat(mqname, mqnb);
-    mq_unlink (mqname);
-    struct mq_attr mqAttr = {0, NVM_FTL_MQ_MAXMSG, NVM_FTL_MQ_MSGSIZE, 0};
-    ftl->mq_id[index] = mq_open (mqname, O_RDWR|O_CREAT,
-                                                     S_IWUSR|S_IRUSR, &mqAttr);
-    if (ftl->mq_id[index] < 0)
-	return EFTL_REGISTER;
+    cmd->mq_req = (void *) req;
+    ret = ftl->ops->submit_io(cmd);
 
-    if(pthread_create(&ftl->io_thread[index], NULL, nvm_ftl_io_thread,
-                                                                 (void *) ftl))
-        return EFTL_REGISTER;
+    if (ret) {
+        log_err ("[ERROR: Cmd %x not completed. Aborted.]\n", cmd->cmdtype);
+        nvm_complete_ftl(cmd);
+    }
+}
 
-    log_info("  [nvm: FTL Queue (%s) started.]\n", mqname);
+static void nvm_ftl_process_cq (void *opaque)
+{
+    struct nvm_io_cmd *cmd = (struct nvm_io_cmd *) opaque;
 
-    core.ftl_q_count++;
-    free(mqname);
-    free(mqnb);
+    nvm_complete_to_host (cmd);
+}
 
-    return 0;
+static void nvm_ftl_process_to (void **opaque, int counter)
+{
+    struct nvm_io_cmd *cmd;
+
+    while (counter) {
+        counter--;
+        cmd = (struct nvm_io_cmd *) opaque[counter];
+        cmd->status.status = NVM_IO_FAIL;
+        cmd->status.nvme_status = NVME_DATA_TRAS_ERROR;
+    }
 }
 
 int nvm_register_ftl (struct nvm_ftl *ftl)
 {
-    int i, ret;
+    struct ox_mq_config *mq_config;
 
     if (strlen(ftl->name) > MAX_NAME_SIZE)
         return EMAX_NAME_SIZE;
 
-    if (ftl->nq < core.nvm_ch_count)
-        log_info("  [WARNING: n of FTL queues < tot of MMGR channels.\n");
-
-    pthread_mutex_init (&ftl->q_mutex, NULL);
     ftl->active = 1;
-    ftl->last_q = ftl->nq - 1;
 
-    for (i = 0; i < ftl->nq; i++) {
-        ret = nvm_create_ftl_queue (ftl, i);
-        if (ret) return ret;
-    }
+    /* Start FTL multi-queue */
+    mq_config = malloc (sizeof (struct ox_mq_config));
+    if (!mq_config)
+        return EMEM;
+
+    mq_config->n_queues = ftl->nq;
+    mq_config->q_size = NVM_FTL_QUEUE_SIZE;
+    mq_config->sq_fn = nvm_ftl_process_sq;
+    mq_config->cq_fn = nvm_ftl_process_cq;
+    mq_config->to_fn = nvm_ftl_process_to;
+    mq_config->to_usec = NVM_FTL_QUEUE_TO;
+    mq_config->flags = OX_MQ_TO_COMPLETE;
+    ftl->mq = ox_mq_init(mq_config);
+    if (!ftl->mq)
+        return -1;
+
+    core.ftl_q_count += ftl->nq;
 
     LIST_INSERT_HEAD(&ftl_head, ftl, entry);
     core.ftl_count++;
@@ -232,7 +240,6 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
     if (ftl->bbtbl_format == FTL_BBTBL_BYTE)
         log_info("    [%s Bad block table type: Byte array. 1 byte per blk.]\n",
                                                                     ftl->name);
-
     return 0;
 }
 
@@ -269,68 +276,51 @@ void nvm_callback (struct nvm_mmgr_io_cmd *cmd)
     }
 }
 
-void nvm_complete_io (struct nvm_io_cmd *cmd)
-{
-    NvmeRequest *req = (NvmeRequest *) cmd->req;
-
-    req->status = (cmd->status.status == NVM_IO_SUCCESS) ?
-                NVME_SUCCESS : (cmd->status.nvme_status) ?
-                      cmd->status.nvme_status : NVME_INTERNAL_DEV_ERROR;
-
-    if (core.debug)
-        printf(" [NVMe cmd 0x%x. cid: %d completed. Status: %x]\n",
-                                 req->cmd->opcode, req->cmd->cid, req->status);
-
-    ((core.run_flag & RUN_TESTS) && core.tests_init->complete_io) ?
-        core.tests_init->complete_io(req) : nvme_rw_cb(req);
-}
-
-int nvm_submit_io (struct nvm_io_cmd *io)
+int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 {
     struct nvm_channel *ch;
     int ret, retry, i, qid;
-    uint64_t cmd_addr = 0;
-    NvmeRequest *req = (NvmeRequest *) io->req;
+    NvmeRequest *req = (NvmeRequest *) cmd->req;
     uint8_t aux_ch;
 
-    io->status.nvme_status = NVME_SUCCESS;
+    cmd->status.nvme_status = NVME_SUCCESS;
 
-    switch (io->status.status) {
+    switch (cmd->status.status) {
         case NVM_IO_NEW:
             break;
         case NVM_IO_PROCESS:
             break;
         case NVM_IO_FAIL:
             req->status = NVME_DATA_TRAS_ERROR;
-            nvm_complete_io(io);
+            nvm_complete_to_host(cmd);
             return NVME_DATA_TRAS_ERROR;
         case NVM_IO_SUCCESS:
             req->status = NVME_SUCCESS;
-            nvm_complete_io(io);
+            nvm_complete_to_host(cmd);
             return NVME_SUCCESS;
         default:
             req->status = NVME_INTERNAL_DEV_ERROR;
-            nvm_complete_io(io);
+            nvm_complete_to_host(cmd);
             return NVME_INTERNAL_DEV_ERROR;
     }
 
 #if LIGHTNVM
     /* For now, the host ppa channel must be aligned with core.nvm_ch[] */
     /* All ppas within the vector must address to the same channel */
-    aux_ch = io->ppalist[0].g.ch;
+    aux_ch = cmd->ppalist[0].g.ch;
 
     if (aux_ch >= core.nvm_ch_count) {
         syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
         req->status = NVME_INTERNAL_DEV_ERROR;
-        nvm_complete_io(io);
+        nvm_complete_to_host(cmd);
         return NVME_INTERNAL_DEV_ERROR;
     }
 
-    for (i = 1; i < io->n_sec; i++) {
-        if (io->ppalist[i].g.ch != aux_ch) {
+    for (i = 1; i < cmd->n_sec; i++) {
+        if (cmd->ppalist[i].g.ch != aux_ch) {
             syslog(LOG_INFO,"[nvm ERROR: IO failed, ch does not match.]\n");
             req->status = NVME_INVALID_FIELD;
-            nvm_complete_io(io);
+            nvm_complete_to_host(cmd);
             return NVME_INVALID_FIELD;
         }
     }
@@ -338,36 +328,34 @@ int nvm_submit_io (struct nvm_io_cmd *io)
     ch = core.nvm_ch[aux_ch];
 #else
     /* For now all channels must be included in the global namespace */
-    for (i = 0; i < nvm_ch_count; i++) {
-        if (io->slba >= nvm_ch[i]->slba && io->slba <= nvm_ch[i]->elba) {
-            ch = nvm_ch[i];
+    for (i = 0; i < core.nvm_ch_count; i++) {
+        if (cmd->slba >= core.nvm_ch[i]->slba && cmd->slba <=
+                                                        core.nvm_ch[i]->elba) {
+            ch = core.nvm_ch[i];
             break;
         }
         syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
         req->status = NVME_INTERNAL_DEV_ERROR;
-        nvm_complete_io(io);
+        nvm_complete_to_host(cmd);
         return NVME_INTERNAL_DEV_ERROR;
     }
 #endif /* LIGHTNVM */
 
-    io->status.status = NVM_IO_PROCESS;
-    io->channel = ch;
-    retry = 16;
-    cmd_addr = (uint64_t) io;
+    cmd->status.status = NVM_IO_PROCESS;
+    cmd->channel = ch;
+    retry = NVM_QUEUE_RETRY;
 
-    /* TODO: make native per-channel FTL queues */
-
-    qid = ch->ch_mmgr_id; /* nvm_ftl_q_schedule(ch->ftl); */
+    qid = nvm_ftl_q_schedule (ch->ftl, cmd);
     do {
-        ret = mq_send(ch->ftl->mq_id[qid], (char *) &cmd_addr,
-                                                         sizeof (uint64_t), 1);
-    	if (ret < 0)
+        ret = ox_mq_submit_req(ch->ftl->mq, qid, cmd);
+
+    	if (ret)
             retry--;
         else if (core.debug)
             printf(" CMD cid: %lu, type: 0x%x submitted to FTL. \n  Channel: "
-                    "%d, FTL queue %d\n", io->cid, io->cmdtype, ch->ch_id, qid);
+                  "%d, FTL queue %d\n", cmd->cid, cmd->cmdtype, ch->ch_id, qid);
 
-    } while (ret < 0 && retry);
+    } while (ret && retry);
 
     if (core.debug)
         usleep (150000);
@@ -397,7 +385,7 @@ int nvm_dma (void *ptr, uint64_t prp, ssize_t size, uint8_t direction)
     return 0;
 }
 
-int nvm_submit_mmgr_io (struct nvm_mmgr_io_cmd *cmd)
+int nvm_submit_mmgr (struct nvm_mmgr_io_cmd *cmd)
 {
     gettimeofday(&cmd->tstart,NULL);
     switch (cmd->nvm_io->cmdtype) {
@@ -646,16 +634,13 @@ static void nvm_unregister_mmgr (struct nvm_mmgr *mmgr)
 
 static void nvm_unregister_ftl (struct nvm_ftl *ftl)
 {
-    int i;
     if (LIST_EMPTY(&ftl_head))
         return;
 
-    for (i = 0; i < ftl->nq; i++) {
-        mq_close(ftl->mq_id[i]);
-        core.ftl_q_count--;
-    }
+    free (ftl->mq->config);
+    ox_mq_destroy(ftl->mq);
+    core.ftl_q_count -= ftl->nq;
 
-    pthread_mutex_destroy (&ftl->q_mutex);
     ftl->active = 0;
 
     ftl->ops->exit(ftl);
@@ -810,14 +795,18 @@ static int nvm_init ()
     core.run_flag |= RUN_NVME_ALLOC;
 
     /* media managers */
-#if MMGR_DFCNAND
+#ifdef CONFIG_MMGR_DFCNAND
     ret = mmgr_dfcnand_init();
+    if(ret) goto OUT;
+#endif
+#ifdef CONFIG_MMGR_VOLT
+    ret = mmgr_volt_init();
     if(ret) goto OUT;
 #endif
     core.run_flag |= RUN_MMGR;
 
     /* flash translation layers */
-#if FTL_LNVMFTL
+#ifdef CONFIG_FTL_LNVM
     ret = ftl_lnvm_init();
     if(ret) goto OUT;
 #endif
@@ -884,7 +873,7 @@ static void nvm_clean_all ()
         nvme_exit();
         core.run_flag ^= RUN_NVME;
     }
-    if (core.run_flag & RUN_NVME_ALLOC) {
+    if ((!core.run_flag && RUN_TESTS) && (core.run_flag & RUN_NVME_ALLOC)) {
         free(core.nvm_nvme_ctrl);
         core.run_flag ^= RUN_NVME_ALLOC;
     }
@@ -949,9 +938,9 @@ static void nvm_print_log ()
                             core.nvm_ch[i]->i.ns_id, core.nvm_ch[i]->i.ns_part,
                             core.nvm_ch[i]->ns_pgs, core.nvm_ch[i]->i.in_use);
     }
-    log_info("  [nvm: namespace size: %llu bytes]\n",
+    log_info("  [nvm: namespace size: %lu bytes]\n",
                                                 core.nvm_nvme_ctrl->ns_size[0]);
-    log_info("    [nvm: total pages: %llu]\n",
+    log_info("    [nvm: total pages: %lu]\n",
                                   core.nvm_nvme_ctrl->ns_size[0] / NVM_PG_SIZE);
 }
 
@@ -973,9 +962,16 @@ int nvm_memcheck (void *mem) {
 
 int nvm_test_unit (struct nvm_init_arg *args)
 {
-    if (core.tests_init->init)
+    if (core.tests_init->init) {
+        core.tests_init->geo.n_blk = LNVM_BLK_LUN;
+        core.tests_init->geo.n_ch =  LNVM_CH;
+        core.tests_init->geo.n_lun = LNVM_LUN_CH;
+        core.tests_init->geo.n_pg =  LNVM_PG_BLK;
+        core.tests_init->geo.n_sec = LNVM_SEC_PG;
+        core.tests_init->geo.n_pl =  LNVM_PLANES;
+        core.tests_init->geo.sec_sz = LNVM_SECSZ;
         return core.tests_init->init(args);
-    else
+    } else
         printf(" Tests are not compiled.\n");
 
     return -1;
@@ -1025,7 +1021,7 @@ int nvm_init_ctrl (int argc, char **argv)
             break;
         case OX_RUN_MODE:
             core.run_flag ^= RUN_TESTS;
-            while(1) { usleep(1); } break;
+            while(1) { usleep(NVM_SEC); } break;
         default:
             goto CLEAN;
     }
@@ -1046,9 +1042,7 @@ OUT:
     return 0;
 }
 
-#if INIT_DFC
 int main (int argc, char **argv)
 {
     return nvm_init_ctrl (argc, argv);
 }
-#endif /* INIT_DFC */

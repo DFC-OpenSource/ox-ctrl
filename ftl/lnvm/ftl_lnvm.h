@@ -15,7 +15,7 @@
 #include <sys/queue.h>
 #include "../../include/ssd.h"
 
-#define FTL_LNVM_IO_RETRY     16
+#define FTL_LNVM_IO_RETRY     0
 #define FTL_LNVM_RSV_BLK      1
 
 struct lnvm_page {

@@ -831,5 +831,5 @@ uint16_t nvme_rw (NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         req->nvm_io.mmgr_io[i].pg_sz = NVME_KERNEL_PG_SIZE;
     }
 
-    return nvm_submit_io(&req->nvm_io);
+    return nvm_submit_ftl(&req->nvm_io);
 }
