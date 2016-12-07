@@ -31,7 +31,8 @@
 #define VOLT_WRITE_TIME     200
 #define VOLT_ERASE_TIME     1200
 
-#define VOLT_QUEUE_SIZE     16
+#define VOLT_QUEUE_SIZE     128
+#define VOLT_QUEUE_TO       48000
 
 typedef struct VoltStatus {
     uint8_t     ready; /* 0x00-busy, 0x01-ready to use */
@@ -65,6 +66,7 @@ typedef struct VoltCtrl {
     VoltLun         *luns;
     VoltCh          *channels;
     struct ox_mq    *mq;
+    uint8_t         *edma; /* emergency DMA buffer for timeout requests */
 } VoltCtrl;
 
 struct volt_dma {

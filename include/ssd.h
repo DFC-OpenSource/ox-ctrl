@@ -50,6 +50,8 @@
 #include "uatomic.h"
 
 #define MAX_NAME_SIZE           31
+#define NVM_QUEUE_RETRY         16
+#define NVM_QUEUE_RETRY_SLEEP   500
 #define NVM_FTL_MQ             "/nvm_mq"
 #define NVM_FTL_MQ_MSGSIZE     8
 #define NVM_FTL_MQ_MAXMSG      64

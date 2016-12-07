@@ -888,7 +888,7 @@ static void nvm_clean_all ()
         nvme_exit();
         core.run_flag ^= RUN_NVME;
     }
-    if (core.run_flag & RUN_NVME_ALLOC) {
+    if ((!core.run_flag && RUN_TESTS) && (core.run_flag & RUN_NVME_ALLOC)) {
         free(core.nvm_nvme_ctrl);
         core.run_flag ^= RUN_NVME_ALLOC;
     }

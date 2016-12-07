@@ -176,10 +176,11 @@ static void volt_clean_mem(void)
     int total_blk = geo->n_of_planes * geo->blk_per_lun * geo->lun_per_ch *
                                                                    geo->n_of_ch;
     for (i = 0; i < total_blk; i++) {
-        free(volt->blocks[i].data);
+        /* TODO: We are getting double free when run the tests, fix it */
+        //free(volt->blocks[i].data);
         volt_sub_mem(geo->pg_size * geo->pg_per_blk);
 
-        free(volt->blocks[i].pages);
+        //free(volt->blocks[i].pages);
         volt_sub_mem(sizeof (VoltPage) * geo->pg_per_blk);
 
     }
@@ -253,11 +254,9 @@ static void volt_nand_dma (void *paddr, void *buf, size_t sz, uint8_t dir)
     switch (dir) {
         case VOLT_DMA_READ:
             memcpy(buf, paddr, sz);
-            //usleep(VOLT_READ_TIME);
             break;
         case VOLT_DMA_WRITE:
             memcpy(paddr, buf, sz);
-            //usleep(VOLT_WRITE_TIME);
             break;
     }
 }
@@ -291,7 +290,6 @@ static int volt_process_io (struct nvm_mmgr_io_cmd *cmd)
             }
             memset(blk->data, 0x0, (geo->pg_size +
                         geo->sec_oob_sz * geo->sec_per_pg) * geo->pg_per_blk);
-            //usleep(VOLT_ERASE_TIME);
             break;
         default:
             dma->status = 0;
@@ -299,13 +297,19 @@ static int volt_process_io (struct nvm_mmgr_io_cmd *cmd)
     }
     dma->status = 1;
 
+    /* DEBUG: Force timeout for testing */
+    /*
+    if (cmd->ppa.g.pg > 28 && cmd->ppa.g.pg < 31)
+        usleep (100000);
+    */
+
     return 0;
 }
 
 static void volt_execute_io (struct ox_mq_entry *req)
 {
     struct nvm_mmgr_io_cmd *cmd = (struct nvm_mmgr_io_cmd *) req->opaque;
-    int ret;
+    int ret, retry;
 
     ret = volt_process_io(cmd);
 
@@ -318,7 +322,14 @@ static void volt_execute_io (struct ox_mq_entry *req)
     cmd->status = NVM_IO_SUCCESS;
 
 COMPLETE:
-    ox_mq_complete_req(volt->mq, req);
+    retry = NVM_QUEUE_RETRY;
+    do {
+        ret = ox_mq_complete_req(volt->mq, req);
+        if (ret) {
+            retry--;
+            usleep (NVM_QUEUE_RETRY_SLEEP);
+        }
+    } while (ret && retry);
 }
 
 static int volt_enqueue_io (struct nvm_mmgr_io_cmd *io)
@@ -345,9 +356,13 @@ static int volt_init_dma_buf (void)
 {
     int slots;
 
+    volt->edma = malloc (VOLT_PAGE_SIZE + VOLT_OOB_SIZE * VOLT_PAGE_COUNT);
+    if (!volt->edma)
+        return -1;
+
     dma_buf = malloc(sizeof (void *) * VOLT_DMA_SLOT_INDEX);
     if (!dma_buf)
-        return -1;
+        goto FREE;
 
     for (slots = 0; slots < VOLT_DMA_SLOT_INDEX; slots++) {
         dma_buf[slots] = malloc(volt_add_mem
@@ -355,6 +370,10 @@ static int volt_init_dma_buf (void)
     }
 
     return 0;
+
+FREE:
+    free (volt->edma);
+    return -1;
 }
 
 static void volt_free_dma_buf (void)
@@ -366,6 +385,7 @@ static void volt_free_dma_buf (void)
         volt_sub_mem(VOLT_PAGE_SIZE + VOLT_SECTOR_SIZE);
     }
     free(dma_buf);
+    free(volt->edma);
 }
 
 static int volt_prepare_rw (struct nvm_mmgr_io_cmd *cmd_nvm)
@@ -483,9 +503,6 @@ static int volt_get_ch_info (struct nvm_channel *ch, uint16_t nc)
         ch[i].mmgr = &volt_mmgr;
         ch[i].geometry = volt_mmgr.geometry;
 
-       // if (dfcnand_read_nvminfo (&ch[i]))
-       //     return -1;
-
         if (ch[i].i.in_use != NVM_CH_IN_USE) {
             ch[i].i.ns_id = 0x0;
             ch[i].i.ns_part = 0x0;
@@ -523,6 +540,49 @@ static int volt_get_ch_info (struct nvm_channel *ch, uint16_t nc)
     return 0;
 }
 
+static void volt_req_timeout (void **opaque, int counter)
+{
+    struct nvm_mmgr_io_cmd *cmd;
+    struct volt_dma *dma;
+
+    while (counter) {
+        counter--;
+        cmd = (struct nvm_mmgr_io_cmd *) opaque[counter];
+        dma = (struct volt_dma *) cmd->rsvd;
+        cmd->status = NVM_IO_TIMEOUT;
+
+        /* During request timeout dma->prp_index is freed and
+         * dma->virt_addr is redirected to the emergency pointer */
+        if (cmd->cmdtype == MMGR_WRITE_PG || cmd->cmdtype == MMGR_READ_PG) {
+            dma->virt_addr = volt->edma;
+            volt_set_prp_map(dma->prp_index, 0x0);
+        }
+    }
+}
+
+struct ox_mq_config volt_mq = {
+    .n_queues   = VOLT_CHIP_COUNT,
+    .q_size     = VOLT_QUEUE_SIZE,
+    .sq_fn      = volt_execute_io,
+    .cq_fn      = volt_callback,
+    .to_fn      = volt_req_timeout,
+    .to_usec    = VOLT_QUEUE_TO,
+    .flags      = OX_MQ_TO_COMPLETE,
+};
+
+/* DEBUG (disabled): Thread to show multi-queue statistics */
+static void *volt_queue_show (void *arg)
+{
+    /*
+    while (1) {
+        usleep (200000);
+        ox_mq_show_stats(volt->mq);
+    }
+    */
+
+    return NULL;
+}
+
 static int volt_init(void)
 {
     int pages_ok;
@@ -545,11 +605,14 @@ static int volt_init(void)
     res_l = volt_init_luns();
     res_c = volt_init_channels();
     ret = volt_init_dma_buf();
-    volt->mq = ox_mq_init(volt_mmgr.geometry->n_of_ch, VOLT_QUEUE_SIZE,
-                                               volt_execute_io, volt_callback);
+    volt->mq = ox_mq_init(&volt_mq);
 
     if (!pages_ok || !res_l || !res_c || ret || !volt->mq)
         goto MEM_CLEAN;
+
+    /* DEBUG: Thread to show multi-queue statistics */
+    pthread_t debug_th;
+    pthread_create(&debug_th,NULL,volt_queue_show,NULL);
 
     volt->status.ready = 1; /* ready to use */
 
