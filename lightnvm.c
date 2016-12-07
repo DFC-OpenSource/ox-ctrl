@@ -291,7 +291,7 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     if (core.null)
         return 0;
 
-    return nvm_submit_io(&req->nvm_io);
+    return nvm_submit_ftl(&req->nvm_io);
 }
 
 static inline uint64_t nvme_gen_to_dev_addr(LnvmCtrl *ln,struct nvm_ppa_addr *r)
@@ -418,7 +418,7 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     if (core.null)
         return 0;
 
-    return nvm_submit_io(&req->nvm_io);
+    return nvm_submit_ftl(&req->nvm_io);
 }
 
 static int lightnvm_flush_tbls(NvmeCtrl *n)

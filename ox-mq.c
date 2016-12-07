@@ -523,6 +523,26 @@ static void ox_mq_check_queue_to (struct ox_mq *mq, struct ox_mq_queue *q)
     }
 }
 
+/*
+ * This thread checks all sq_wait queues for timeout requests.
+ *
+ * If a timeout entry id found, the follow steps are performed:
+ *  - Remove the entry from sq_wait;
+ *  - Set timeout entry status to OX_MQ_TIMEOUT;
+ *  - Allocate a new entry;
+ *  - Insert the new entry to the sq_free;
+ *  - Insert the new entry to mq->ext_entries for exit free process;
+ *
+ * After all entries are processed:
+ *  - Call the user defined timeout function and pass the list of TO entries;
+ *    - In this function, the user should set the opaque structures as failed
+ *  - If the flag is enabled, submit all the entries for completion;
+ *  - Set timeout entries status to OX_MQ_TIMEOUT_COMPLETED;
+ *
+ * If the entry is called for completion later:
+ *  - Check is the entry is part of the ext_entries, if yes, free memory;
+ *    - Set the entry as OX_MQ_TIMEOUT_BACK (to avoid double free)
+ */
 static void *ox_mq_to_thread (void *arg)
 {
     struct ox_mq *mq = (struct ox_mq *) arg;
