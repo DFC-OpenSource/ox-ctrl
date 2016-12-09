@@ -9,6 +9,8 @@ device we may have different channels managed by different FTLs.
 
 The repositories cited here are the latest setup tested succesfully with OX. Once direct I/O support to physical Open-Channel SSDs in the Linux kernel is a work-in-progress task, mix the setup with other sources may result in compatibility problems.
 
+For the latest commits, plase check branch 'for-next'.
+
 PLEASE, REFER TO THE WIKI FOR FULL DOCUMENTATION:
 ```
 https://github.com/DFC-OpenSource/ox-ctrl/wiki
@@ -69,7 +71,7 @@ SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
   $ sudo nvme lnvm init -d nvme0n1  
 - Check the device with nvme-cli, you should see the device with 'gennvm' initialized in nvme0n1;
   $ sudo nvme lnvm list
-- Run the tests with the tool (soon...), or use liblightnvm as you wish.
+- Run the tests with the tool (https://github.com/ivpi/fox), or use liblightnvm as you wish.
 ```
 UBUNTU IMAGE WITH THE ENVIRONMENT AND TESTS READY TO RUN:
 ```
