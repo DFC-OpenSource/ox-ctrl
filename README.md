@@ -45,6 +45,12 @@ TOOL FOR TESTING OPEN-CHANNEL SSDs:
 ```
 https://github.com/ivpi/fox
 ```
+Under ./bin you can find OX already compiled:
+```
+ - ox-ctrl is a essential-only binary for a production environment. 
+ - ox-ctrl-test is a complete binary including all tests and administration mode. 
+ - ox-ctrl-volt has Volt Storage Media Manager. An in-memory backend instead of NAND, for testing purposes.
+ ```
 SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
 ```
 - Install the kernel for user ppa IO;
@@ -69,7 +75,7 @@ SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
   $ sudo nvme lnvm init -d nvme0n1  
 - Check the device with nvme-cli, you should see the device with 'gennvm' initialized in nvme0n1;
   $ sudo nvme lnvm list
-- Run the tests with the tool (soon...), or use liblightnvm as you wish.
+- Run the tests with the tool (https://github.com/ivpi/fox), or use liblightnvm as you wish.
 ```
 UBUNTU IMAGE WITH THE ENVIRONMENT AND TESTS READY TO RUN:
 ```
@@ -78,7 +84,7 @@ soon...
 
 LIMITATIONS:
 ```
-OX DOES NOT HAVE A FTL FOR STANDARD BLOCK DEVICES, BUT IT HAS THE CAPABILITIES FOR IT. FOR NOW OX WORKS ONLY AS OPEN-CHANNEL CONTROLLER.
+OX DOES NOT HAVE A FTL FOR STANDARD BLOCK DEVICES, BUT IT HAS THE CAPABILITIES FOR IT. FOR NOW OX WORKS AS OPEN-CHANNEL CONTROLLER.
 OX HAS BEEN DESIGNED TO SUPPORT SEVERAL FTL IMPLEMENTATIONS IN A STANDARD INTERFACE.
 IT IS FUTURE WORK. YOU ARE WELCOME TO CONTRIBUTE.
 ```
@@ -144,11 +150,14 @@ We have implemented a PCIe interconnection handler, a media manager to expose 8 
 
 HOW TO INSTALL AND USE:
 
-The Makefile creates 2 binaries (ox-ctrl and ox-ctrl-test). ox-ctrl is a essential-only binary for a production environment. ox-ctrl-test is a complete binary including all tests and administration mode.
+The Makefile creates 3 binaries (ox-ctrl, ox-ctrl-test and ox-ctrl-volt). 
+ - ox-ctrl is a essential-only binary for a production environment. 
+ - ox-ctrl-test is a complete binary including all tests and administration mode. 
+ - ox-ctrl-volt has Volt Storage Media Manager. An in-memory backend instead of NAND, for testing purposes.
 
-Under /bin you can find both binaries + the DFC rootfs with OX included. 
+Under /bin you can find the binaries + the DFC rootfs with OX included. 
 
-WE RECOMMEND THE USE OF ROOTFS. AFTER UPGRADE THE ROOTFS FIRMWARE, ONLY TYPE 'ox-ctrl' OR 'ox-ctrl-test' TO USE OX.
+WE RECOMMEND THE USE OF ROOTFS. AFTER UPGRADE THE ROOTFS FIRMWARE, ONLY TYPE 'ox-ctrl', 'ox-ctrl-test' OR 'ox-ctrl-volt' TO USE OX.
 
 OX accepts parameters as follow:
 
@@ -161,7 +170,15 @@ Use 'start' to run the controller with standard settings.
 ```
 Use 'debug' to run the controller in debug mode (verbose).
 ```
-
+#ox-ctrl null
+```
+Use 'null' to run the controller as a null device. No data transfer is performed, OX will complete all I/Os succesfully. 
+This mode is useful for testing the NVMe queues.
+```
+#ox-ctrl null-debug
+```
+Use 'null-debug' to run the controller as a null device and show the debug information in the screen.
+```
 #ox-ctrl --help
 ```
 *** OX Controller ***
@@ -173,6 +190,8 @@ Use 'debug' to run the controller in debug mode (verbose).
   debug            Start controller and print Admin/IO commands
   test             Start controller, run tests and close
   admin            Execute specific tasks within the controller
+  null             Start controller with Null IOs (NVMe queue tests)
+  null-debug       Null IOs and print Admin/IO commands
  
  Initial release developed by Ivan L. Picoli, the red-eagle
 
@@ -411,21 +430,5 @@ struct nvm_pcie {
 
 #OX Core Global Functions (used by all layers):
 ```
-/* core functions */
-int  nvm_register_mmgr(struct nvm_mmgr *);
-int  nvm_register_pcie_handler(struct nvm_pcie *);
-int  nvm_register_ftl (struct nvm_ftl *);
-int  nvm_submit_io (struct nvm_io_cmd *);
-int  nvm_submit_mmgr_io (struct nvm_mmgr_io_cmd *);
-void nvm_callback (struct nvm_mmgr_io_cmd *);
-void nvm_complete_io (struct nvm_io_cmd *);
-int  nvm_dma (void *, uint64_t, ssize_t, uint8_t);
-int  nvm_memcheck (void *);
-int  nvm_ftl_cap_exec (uint8_t, void **, int);
-int  nvm_init_ctrl (int, char **);
-int  nvm_test_unit (struct nvm_init_arg *);
-int  nvm_submit_sync_io (struct nvm_channel *, struct nvm_mmgr_io_cmd *,
-                                                              void *, uint8_t);
-int  nvm_submit_multi_plane_sync_io (struct nvm_channel *,
-                          struct nvm_mmgr_io_cmd *, void *, uint8_t, uint64_t);
+Refer to include/ssd.h (end of the file) for further details
 ```
