@@ -1030,6 +1030,8 @@ int nvm_init_ctrl (int argc, char **argv)
         pthread_create(&mode_t, NULL, modet_fn, NULL);
         pthread_join(mode_t, NULL);
     }
+    
+    while(1) { usleep(NVM_SEC); }
 
     goto OUT;
 CLEAN:

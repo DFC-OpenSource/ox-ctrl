@@ -36,7 +36,7 @@
 #include "include/ssd.h"
 
 extern struct core_struct core;
-const char *argp_program_version = "ox-ctrl v1.1";
+const char *argp_program_version = "ox-ctrl v1.2";
 const char *argp_program_bug_address = "Ivan L. Picoli <ivpi@itu.dk>";
 
 enum cmdtypes {
@@ -48,7 +48,7 @@ enum cmdtypes {
     CMDARG_NULL_DEBUG
 };
 
-static char doc_global[] = "\n*** OX Controller v1.1***\n"
+static char doc_global[] = "\n*** OX Controller v1.2***\n"
         " \n An OpenChannel SSD Controller\n\n"
         " Available commands:\n"
         "  start            Start controller with standard configuration\n"
@@ -57,7 +57,7 @@ static char doc_global[] = "\n*** OX Controller v1.1***\n"
         "  null-debug       Null IOs and print Admin/IO commands\n"
         "  test             Start controller, run tests and close\n"
         "  admin            Execute specific tasks within the controller\n"
-        " \n Initial release developed by Ivan L. Picoli, the red-eagle\n\n";
+        " \n Initial release developed by Ivan L. Picoli, <ivpi@itu.dk>\n\n";
 
 static char doc_test[] =
         "\nUse this command to run tests, it will start the controller,"
