@@ -819,10 +819,12 @@ typedef struct NvmeNamespace {
 } NvmeNamespace;
 
 typedef struct NvmeRequest {
+    uint8_t                  ext; /* allocated later due timeout request */
     TAILQ_ENTRY(NvmeRequest) entry;
+    LIST_ENTRY(NvmeRequest)  ext_req;
     struct NvmeSQ            *sq;
     struct NvmeNamespace     *ns;
-    struct NvmeCmd           *cmd;
+    struct NvmeCmd           cmd;
     NvmeCqe                  cqe;
     uint16_t                 status;
     uint64_t                 slba;
@@ -1022,6 +1024,7 @@ typedef struct NvmeCtrl {
     pthread_spinlock_t                          qs_req_spin;
     pthread_spinlock_t                          aer_req_spin;
     pthread_mutex_t                             req_mutex;
+    LIST_HEAD(ext_list, NvmeRequest)            ext_list;/*req allocated later*/
 
 #if LIGHTNVM
     LnvmCtrl     lightnvm_ctrl;

@@ -30,6 +30,7 @@
  */
 
 #include <time.h>
+#include <string.h>
 #include "../include/ssd.h"
 #include "../include/tests.h"
 #include "../include/nvme.h"
@@ -37,6 +38,7 @@
 #include "../include/uatomic.h"
 
 extern struct core_struct core;
+extern struct tests_init_st tests_is;
 
 static void ***wbuf;
 static void ***rbuf;
@@ -63,7 +65,7 @@ static void tests_free_global ()
 
 static int tests_compare_free_buf (int pgs)
 {
-    int match = 0, ch_i, pg_i, n_pl = TESTS_PLANES;
+    int match = 0, ch_i, pg_i, n_pl = tests_is.geo.n_pl;
     void *wptr, *rptr;
     uint32_t pg_sz = NVM_PG_SIZE + NVM_OOB_SIZE;
 
@@ -88,7 +90,7 @@ static int tests_compare_free_buf (int pgs)
 static void tests_init_buf (int pgs)
 {
     int ci, pi;
-    int n_pl = TESTS_PLANES;
+    int n_pl = tests_is.geo.n_pl;
     uint32_t pg_sz = NVM_PG_SIZE + NVM_OOB_SIZE;
 
     wbuf = malloc (sizeof(void *) * core.nvm_ch_count);
@@ -115,8 +117,8 @@ static struct tests_io_request *tests_new_io_req (struct nvm_ppa_addr *ppa,
     void *first_pg, *meta;
     void **prp_list;
     void ***cbuf;
-    int n_sec = TESTS_SEC_PG * TESTS_PLANES;
-    int sec_pg = TESTS_SEC_PG;
+    int n_sec = tests_is.geo.n_sec * tests_is.geo.n_pl;
+    int sec_pg = tests_is.geo.n_sec;
     int sec_i;
 
     if (opcode == LNVM_CMD_ERASE_SYNC)
@@ -144,11 +146,11 @@ static struct tests_io_request *tests_new_io_req (struct nvm_ppa_addr *ppa,
 
     cbuf = (opcode == LNVM_CMD_PHYS_WRITE) ? wbuf : rbuf;
 
-    meta = cbuf[ppa->g.ch][ppa->g.pg] + NVM_PG_SIZE * TESTS_PLANES;
+    meta = cbuf[ppa->g.ch][ppa->g.pg] + NVM_PG_SIZE * tests_is.geo.n_pl;
     first_pg = cbuf[ppa->g.ch][ppa->g.pg];
     for (sec_i = 1; sec_i < n_sec; sec_i++)
             prp_list[sec_i - 1] = cbuf[ppa->g.ch][ppa->g.pg] +
-                                                          TESTS_SEC_SZ * sec_i;
+                                                   tests_is.geo.sec_sz * sec_i;
 
 ERASE:
     for (sec_i = 0; sec_i < n_sec; sec_i++) {
@@ -231,17 +233,17 @@ static int tests_lnvm_erase_fn (int rand_i)
         ppa.g.lun = rand_lun[rand_i];
         req[i] = tests_new_io_req (&ppa, i, LNVM_CMD_ERASE_SYNC);
         if (!req[i]) {
-            err += TESTS_PLANES;
+            err += tests_is.geo.n_pl;
             continue;
         }
 
         ret = nvme_io_cmd (core.nvm_nvme_ctrl, req[i]->cmd, req[i]->req);
         if (ret != NVME_NO_COMPLETE && ret != NVME_SUCCESS) {
-            err += TESTS_PLANES;
+            err += tests_is.geo.n_pl;
             continue;
         }
 
-        n_blk += TESTS_PLANES;
+        n_blk += tests_is.geo.n_pl;
     }
 
     do {
@@ -257,7 +259,7 @@ static int tests_lnvm_erase_fn (int rand_i)
 
     for (i = 0; i < core.nvm_ch_count; i++) {
         if (req[i]->req->status != NVME_SUCCESS)
-            err += TESTS_PLANES;
+            err += tests_is.geo.n_pl;
         tests_lnvm_free_test_req (req[i]);
     }
 
@@ -303,7 +305,7 @@ static int tests_lnvm_rw_fn (uint16_t opcode, int n_pgs, int rand_i)
             ppa.g.pg = pg_i;
             req[ch_i][pg_i] = tests_new_io_req (&ppa, ch_i, opcode);
             if (!req[ch_i][pg_i]) {
-                err += TESTS_PLANES;
+                err += tests_is.geo.n_pl;
                 continue;
             }
 
@@ -311,11 +313,11 @@ static int tests_lnvm_rw_fn (uint16_t opcode, int n_pgs, int rand_i)
                                                         req[ch_i][pg_i]->req);
 
             if (ret != NVME_NO_COMPLETE && ret != NVME_SUCCESS) {
-                err += TESTS_PLANES;
+                err += tests_is.geo.n_pl;
                 continue;
             }
 
-            n_pg += TESTS_PLANES;
+            n_pg += tests_is.geo.n_pl;
 
             if (n_pg % 8 == 0)
                 usleep((opcode == LNVM_CMD_PHYS_WRITE) ? 2400: 6000);
@@ -341,7 +343,7 @@ static int tests_lnvm_rw_fn (uint16_t opcode, int n_pgs, int rand_i)
     for (ch_i = 0; ch_i < core.nvm_ch_count; ch_i++) {
         for (pg_i = 0; pg_i < n_pgs; pg_i++) {
             if (req[ch_i][pg_i]->req->status != NVME_SUCCESS)
-                err += TESTS_PLANES;
+                err += tests_is.geo.n_pl;
             tests_lnvm_free_test_req (req[ch_i][pg_i]);
         }
         free (req[ch_i]);
@@ -357,9 +359,10 @@ static int tests_lnvm_rw_fn (uint16_t opcode, int n_pgs, int rand_i)
 
     if (opcode == LNVM_CMD_PHYS_READ) {
         match = tests_compare_free_buf (n_pgs);
-        err += n_pg/TESTS_PLANES - match;
+        err += n_pg/tests_is.geo.n_pl - match;
         printf("       Page (2 pl) data OK  : %d\n", match);
-        printf("       Page (2 pl) data FAIL: %d\n", n_pg/TESTS_PLANES - match);
+        printf("       Page (2 pl) data FAIL: %d\n", n_pg/tests_is.geo.n_pl -
+                                                                         match);
     }
 
     free (req);
@@ -389,12 +392,12 @@ static int test_s02_lnvm_erase_full_fn (struct tests_test *test)
 
 static int test_s02_lnvm_write_full_blk_fn (struct tests_test *test)
 {
-    return tests_lnvm_rw_fn (LNVM_CMD_PHYS_WRITE, TESTS_PGS, 3);
+    return tests_lnvm_rw_fn (LNVM_CMD_PHYS_WRITE, tests_is.geo.n_pg, 3);
 }
 
 static int test_s02_lnvm_read_full_blk_fn (struct tests_test *test)
 {
-    return tests_lnvm_rw_fn (LNVM_CMD_PHYS_READ, TESTS_PGS, 3);
+    return tests_lnvm_rw_fn (LNVM_CMD_PHYS_READ, tests_is.geo.n_pg, 3);
 }
 
 static int test_s02_lnvm_identify_fn (struct tests_test *test)
@@ -547,10 +550,10 @@ int testset_lnvm_init (struct nvm_init_arg *args) {
             return -1;
     }
 
-    rand_lun[2] = rand() % TESTS_LUNS;
-    rand_blk[2] = (rand() % TESTS_BLKS) + 10;
-    rand_lun[3] = rand() % TESTS_LUNS;
-    rand_blk[3] = (rand() % TESTS_BLKS) + 10;
+    rand_lun[2] = rand() % tests_is.geo.n_lun;
+    rand_blk[2] = (rand() % (tests_is.geo.n_blk - 4)) + 4;
+    rand_lun[3] = rand() % tests_is.geo.n_lun;
+    rand_blk[3] = (rand() % (tests_is.geo.n_blk - 4)) + 4;
 
     if (args->arg_flag & CMDARG_FLAG_A || args->arg_flag & CMDARG_FLAG_S) {
         printf("[LIGHTNVM_TESTS: random lun: %d, random blk: %d]\n",

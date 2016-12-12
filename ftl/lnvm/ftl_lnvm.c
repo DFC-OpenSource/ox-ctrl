@@ -42,6 +42,7 @@
 LIST_HEAD(lnvm_ch, lnvm_channel) ch_head = LIST_HEAD_INITIALIZER(ch_head);
 
 static pthread_mutex_t endio_mutex;
+static int lnvm_submit_io (struct nvm_io_cmd *);
 
 static struct lnvm_channel *lnvm_get_ch_instance(uint16_t ch_id)
 {
@@ -71,17 +72,17 @@ static int lnvm_check_pgmap_complete (uint8_t *pgmap) {
 
 static int lnvm_pg_read (struct nvm_mmgr_io_cmd *cmd)
 {
-    return nvm_submit_mmgr_io(cmd);
+    return nvm_submit_mmgr(cmd);
 }
 
 static int lnvm_pg_write (struct nvm_mmgr_io_cmd *cmd)
 {
-    return nvm_submit_mmgr_io(cmd);
+    return nvm_submit_mmgr(cmd);
 }
 
 static int lnvm_erase_blk (struct nvm_mmgr_io_cmd *cmd)
 {
-    return nvm_submit_mmgr_io(cmd);
+    return nvm_submit_mmgr(cmd);
 }
 
 /* If all pages were processed, it checks for errors. If all succeed, finish
@@ -92,29 +93,42 @@ static int lnvm_erase_blk (struct nvm_mmgr_io_cmd *cmd)
 static void lnvm_check_end_io (struct nvm_io_cmd *cmd)
 {
     if (cmd->status.pgs_p == cmd->status.total_pgs) {
+
         pthread_mutex_lock(&endio_mutex);
         if ( lnvm_check_pgmap_complete(cmd->status.pg_map) ) { //IO not ended
+
             cmd->status.ret_t++;
             if (cmd->status.ret_t <= FTL_LNVM_IO_RETRY) {
                 log_err ("[FTL WARNING: Cmd resubmitted due failed pages]\n");
-                nvm_submit_io(cmd);
+                goto SUBMIT;
             } else {
+                log_err ("endind for fail\n");
                 cmd->status.status = NVM_IO_FAIL;
                 cmd->status.nvme_status = NVME_DATA_TRAS_ERROR;
-                nvm_complete_io(cmd);
+                goto COMPLETE;
             }
+
         } else {
             cmd->status.status = NVM_IO_SUCCESS;
             cmd->status.nvme_status = NVME_SUCCESS;
-            nvm_complete_io(cmd);
+            goto COMPLETE;
         }
-        pthread_mutex_unlock(&endio_mutex);
     }
+    goto RETURN;
+
+SUBMIT:
+    pthread_mutex_unlock(&endio_mutex);
+    lnvm_submit_io(cmd);
+    goto RETURN;
+
+COMPLETE:
+    pthread_mutex_unlock(&endio_mutex);
+    nvm_complete_ftl(cmd);
+
+RETURN:
+    return 0;
 }
 
-/* TODO: For now, we assume all the pages will be back from MMGR,
- * we dont define a timeout to finish the IO.
- */
 static void lnvm_callback_io (struct nvm_mmgr_io_cmd *cmd)
 {
     if (cmd->status == NVM_IO_SUCCESS) {
@@ -125,6 +139,7 @@ static void lnvm_callback_io (struct nvm_mmgr_io_cmd *cmd)
         pthread_mutex_lock(&endio_mutex);
         cmd->nvm_io->status.pg_errors++;
     }
+
     cmd->nvm_io->status.pgs_p++;
     pthread_mutex_unlock(&endio_mutex);
 
@@ -191,16 +206,16 @@ static int lnvm_check_io (struct nvm_io_cmd *cmd)
 {
     int i;
 
-    if (cmd->sec_offset && (cmd->cmdtype != MMGR_ERASE_BLK))
+    if (cmd->sec_offset && (cmd->cmdtype != MMGR_ERASE_BLK)) {
         cmd->status.total_pgs = (cmd->n_sec / LNVM_SEC_PG) + 1;
+    }
 
-    for (i = 64; i > cmd->status.total_pgs; i--)
+    for (i = 64; i > cmd->status.total_pgs; i--){
         lnvm_set_pgmap(cmd->status.pg_map, i-1);
+    }
 
     cmd->status.pgs_p = cmd->status.pgs_s;
 
-    // TODO: if erase, wait for the ongoing W/R to complete before erase blk;
-    // During erasing, block all r/w to the target block until erase completion
     if (cmd->cmdtype == MMGR_ERASE_BLK)
         return 0;
 
@@ -217,6 +232,12 @@ static int lnvm_check_io (struct nvm_io_cmd *cmd)
 
 static int lnvm_submit_io (struct nvm_io_cmd *cmd)
 {
+    /* DEBUG: Force timeout for testing */
+    /*
+    if (cmd->ppalist[0].g.pg > 64 && cmd->ppalist[0].g.pg < 68)
+        return 0;
+    */
+
     int ret, i;
     ret = lnvm_check_io(cmd);
     if (ret) return ret;
