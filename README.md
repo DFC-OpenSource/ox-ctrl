@@ -1,11 +1,16 @@
-# OX: Open-Channel SSD Controller
+# OX: An Open-Source Open-Channel SSD Controller
 
-OX is a controller solution for programmable devices like the dragon Fire Card. OX exposes the
-device as a LightNVM compatible Open-Channel SSD. OX has been developed to work
-as a hybrid controller, potentially supporting different FTL responsabilities (e.g. write
-buffering or ECC) or a full-fledged FTL. FTLs are registered within the OX core,
-enabling applications to select channels to be managed by a specific FTL. Within a
-device we may have different channels managed by different FTLs.
+OX is a controller solution for programmable devices like the Dragon Fire Card. OX implements 
+the NVMe specification and exposes the device as a LightNVM compatible Open-Channel SSD. 
+OX has been developed to work as a hybrid controller, potentially supporting different FTL 
+responsabilities (e.g. write buffering or ECC) or a full-fledged FTL. FTLs are registered 
+within the OX core, enabling applications to select Storage Channels to be managed by a specific FTL. 
+Within a device we may have several aStorage Channels managed by different FTLs.
+
+OX is design to support both NVMe over PCIe and NVMe over Fabrics. RDMA and Fabrics is a work-in-progres.
+
+OX can also be used to explore near-data processing. Shipping cross-compiled binary code from the host to be 
+executed by the card (e.g. DFC) is a work-in-progress. 
 
 The repositories cited here are the latest setup tested succesfully with OX. Once direct I/O support to physical Open-Channel SSDs in the Linux kernel is a work-in-progress task, mix the setup with other sources may result in compatibility problems.
 
@@ -57,7 +62,8 @@ SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
 ```
 - Install the kernel for user ppa IO;
   - https://github.com/ivpi/linux-liblnvm  
-- Blacklist the nvme driver (not necessary in QEMU. For the DFC, we use an OX-enabled driver);
+- Blacklist the nvme driver (not necessary in QEMU. For the DFC, the driver must be loaded later);
+  - In /etc/default/grub -> modify line to: GRUB_CMDLINE_LINUX_DEFAULT="quiet splash modprobe.blacklist=nvme"
 - Install liblightnvm;
   - https://github.com/ivpi/linux-liblnvm
 - Install nvme-cli;
@@ -87,8 +93,7 @@ soon...
 LIMITATIONS:
 ```
 OX DOES NOT HAVE A FTL FOR STANDARD BLOCK DEVICES, BUT IT HAS THE CAPABILITIES FOR IT. FOR NOW OX WORKS AS OPEN-CHANNEL CONTROLLER.
-OX HAS BEEN DESIGNED TO SUPPORT SEVERAL FTL IMPLEMENTATIONS IN A STANDARD INTERFACE.
-IT IS FUTURE WORK. YOU ARE WELCOME TO CONTRIBUTE.
+OX HAS BEEN DESIGNED TO SUPPORT SEVERAL FTL IMPLEMENTATIONS. YOU ARE WELCOME TO CONTRIBUTE.
 ```
 
 This controller supports the FPGA 3.01.00.
