@@ -55,18 +55,19 @@ static struct lnvm_channel *lnvm_get_ch_instance(uint16_t ch_id)
     return NULL;
 }
 
-static void lnvm_set_pgmap(uint8_t *pgmap, uint8_t index)
+static void lnvm_set_pgmap(uint8_t *pgmap, uint8_t index, uint8_t flag)
 {
     pthread_mutex_lock(&endio_mutex);
-    pgmap[index / 8] |= 1 << (index % 8);
+    pgmap[index / 8] = (flag)
+            ? pgmap[index / 8] | (1 << (index % 8))
+            : pgmap[index / 8] ^ (1 << (index % 8));
     pthread_mutex_unlock(&endio_mutex);
 }
 
-static int lnvm_check_pgmap_complete (uint8_t *pgmap) {
-    int sum, i;
-    for (i = 0; i < 8; i++)
-        sum += pgmap[i] ^ 0xff;
-
+static int lnvm_check_pgmap_complete (uint8_t *pgmap, uint8_t ni) {
+    int sum = 0, i;
+    for (i = 0; i < ni; i++)
+        sum += pgmap[i];
     return sum;
 }
 
@@ -90,19 +91,21 @@ static int lnvm_erase_blk (struct nvm_mmgr_io_cmd *cmd)
  *
  * Calls to this fn come from submit_io or from end_pg_io
  */
-static void lnvm_check_end_io (struct nvm_io_cmd *cmd)
+static int lnvm_check_end_io (struct nvm_io_cmd *cmd)
 {
     if (cmd->status.pgs_p == cmd->status.total_pgs) {
 
         pthread_mutex_lock(&endio_mutex);
-        if ( lnvm_check_pgmap_complete(cmd->status.pg_map) ) { //IO not ended
+        /* if true, some pages failed */
+        if ( lnvm_check_pgmap_complete(cmd->status.pg_map,
+                                      ((cmd->status.total_pgs - 1) / 8) + 1)) {
 
             cmd->status.ret_t++;
             if (cmd->status.ret_t <= FTL_LNVM_IO_RETRY) {
                 log_err ("[FTL WARNING: Cmd resubmitted due failed pages]\n");
                 goto SUBMIT;
             } else {
-                log_err ("endind for fail\n");
+                log_err ("[FTL WARNING: Completing FAILED command]\n");
                 cmd->status.status = NVM_IO_FAIL;
                 cmd->status.nvme_status = NVME_DATA_TRAS_ERROR;
                 goto COMPLETE;
@@ -132,7 +135,7 @@ RETURN:
 static void lnvm_callback_io (struct nvm_mmgr_io_cmd *cmd)
 {
     if (cmd->status == NVM_IO_SUCCESS) {
-        lnvm_set_pgmap(cmd->nvm_io->status.pg_map, cmd->pg_index);
+        lnvm_set_pgmap(cmd->nvm_io->status.pg_map, cmd->pg_index,FTL_PGMAP_OFF);
         pthread_mutex_lock(&endio_mutex);
         cmd->nvm_io->status.pgs_s++;
     } else {
@@ -206,12 +209,12 @@ static int lnvm_check_io (struct nvm_io_cmd *cmd)
 {
     int i;
 
-    if (cmd->sec_offset && (cmd->cmdtype != MMGR_ERASE_BLK)) {
+    if (cmd->sec_offset && (cmd->cmdtype != MMGR_ERASE_BLK))
         cmd->status.total_pgs = (cmd->n_sec / LNVM_SEC_PG) + 1;
-    }
 
-    for (i = 64; i > cmd->status.total_pgs; i--){
-        lnvm_set_pgmap(cmd->status.pg_map, i-1);
+    if (cmd->status.pgs_p == 0) {
+        for (i = 0; i < cmd->status.total_pgs; i++)
+            lnvm_set_pgmap(cmd->status.pg_map, i, FTL_PGMAP_ON);
     }
 
     cmd->status.pgs_p = cmd->status.pgs_s;
@@ -224,8 +227,6 @@ static int lnvm_check_io (struct nvm_io_cmd *cmd)
         cmd->status.status = NVM_IO_FAIL;
         return cmd->status.nvme_status = NVME_INVALID_FORMAT;
     }
-
-    // TODO: check page/NAND constrains before r/w
 
     return 0;
 }
@@ -243,12 +244,20 @@ static int lnvm_submit_io (struct nvm_io_cmd *cmd)
     if (ret) return ret;
 
     for (i = 0; i < cmd->status.total_pgs; i++) {
-        if ((cmd->status.pg_map[i / 8] & 1 << (i % 8)) == 0) {
+
+        /* if true, page not processed yet */
+        if ( cmd->status.pg_map[i / 8] & (1 << (i % 8)) ) {
             if (lnvm_check_pg_io(cmd, i)) {
                 cmd->status.status = NVM_IO_FAIL;
                 cmd->status.nvme_status = NVME_INVALID_FORMAT;
                 return -1;
             }
+        }
+    }
+
+    for (i = 0; i < cmd->status.total_pgs; i++) {
+        /* if true, page not processed yet */
+        if ( cmd->status.pg_map[i / 8] & (1 << (i % 8)) ) {
             switch (cmd->cmdtype) {
                 case MMGR_WRITE_PG:
                     ret = lnvm_pg_write(&cmd->mmgr_io[i]);
