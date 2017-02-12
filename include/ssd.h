@@ -95,6 +95,7 @@ struct nvm_ppa_addr {
 
 struct nvm_memory_region {
     uint64_t     addr;
+    uint64_t     paddr;
     uint64_t     size;
     uint8_t      is_valid;
 };

@@ -226,6 +226,7 @@ static int pcie_mmap_host_mem (struct pci_ctrl *pci)
     log_info("  [pci: host io_mem_addr : %p]\n", mem_addr);
 
     pci->io_mem.addr = (uint64_t)mem_addr;
+    pci->io_mem.paddr = HOST_OUTBOUND_ADDR;
     pci->io_mem.size = HOST_OUTBOUND_SIZE;
     pci->io_mem.is_valid = 1;
 
