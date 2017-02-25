@@ -2,6 +2,7 @@
 #define DFC_NAND_H
 
 #include <stdint.h>
+#include "../../include/uatomic.h"
 
 #define NAND_PAGE_COUNT         512
 #define NAND_SECTOR_COUNT       4
@@ -42,6 +43,7 @@ struct dfcnand_io {
     int                      prp_index;
     uint8_t                  cmd_type;
     struct nvm_mmgr_io_cmd   *nvm_mmgr_io;
+    void                     *mq_req;
 };
 
 #endif /* DFC_NAND_H */
