@@ -815,7 +815,6 @@ static void nvme_post_cqe (NvmeCQ *cq, NvmeRequest *req)
     NvmeCtrl *n = cq->ctrl;
     NvmeSQ *sq = req->sq;
     NvmeCqe *cqe = &req->cqe;
-    NvmeRequest *new_req;
     uint8_t phase = cq->phase;
     uint64_t addr;
 
@@ -844,15 +843,8 @@ static void nvme_post_cqe (NvmeCQ *cq, NvmeRequest *req)
     nvme_addr_write (n, addr, (void *)cqe, sizeof (*cqe));
     nvme_inc_cq_tail (cq);
 
-    /* Failed requests are not used in the queue
-     * In case of timeout request, we have to avoid reusing the same structure
-     * TODO: Free these structures when the timeout request hits completion */
-    if (req->status != NVME_SUCCESS) {
-        new_req = malloc (sizeof (NvmeRequest));
-        memcpy (new_req, req, sizeof (NvmeRequest));
-        new_req->ext = 1;
-        req = new_req;
-    }
+    /* In case of timeout request, we have to avoid reusing the same structure
+     * TODO: Replace structures in case of timeout */
 
     TAILQ_INSERT_TAIL (&sq->req_list, req, entry);
     if (cq->hold_sqs) cq->hold_sqs = 0;
@@ -878,12 +870,14 @@ void nvme_enqueue_req_completion (NvmeCQ *cq, NvmeRequest *req)
 	pthread_mutex_unlock(&n->req_mutex);
 	return;
     }
+
+    notify = coalesce_disabled || !req->sq->sqid || !time_ns ||
+	req->status != NVME_SUCCESS || nvme_cqes_pending(cq) >= thresh;
+
     pthread_mutex_lock(&n->req_mutex);
     nvme_post_cqe (cq, req);
     pthread_mutex_unlock(&n->req_mutex);
 
-    notify = coalesce_disabled || !req->sq->sqid || !time_ns ||
-	req->status != NVME_SUCCESS || nvme_cqes_pending(cq) >= thresh;
     if (notify)
 	nvm_pcie->ops->isr_notify(cq);
 }

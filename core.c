@@ -138,7 +138,7 @@ static void nvm_complete_to_host (struct nvm_io_cmd *cmd)
 
     req->status = (cmd->status.status == NVM_IO_SUCCESS) ?
                 NVME_SUCCESS : (cmd->status.nvme_status) ?
-                      cmd->status.nvme_status : NVME_INTERNAL_DEV_ERROR;
+                      cmd->status.nvme_status : NVME_CMD_ABORT_REQ;
 
     if (core.debug)
         printf(" [NVMe cmd 0x%x. cid: %d completed. Status: %x]\n",
@@ -193,7 +193,7 @@ static void nvm_ftl_process_to (void **opaque, int counter)
         counter--;
         cmd = (struct nvm_io_cmd *) opaque[counter];
         cmd->status.status = NVM_IO_FAIL;
-        cmd->status.nvme_status = NVME_DATA_TRAS_ERROR;
+        cmd->status.nvme_status = NVME_CMD_ABORT_REQ;
     }
 }
 
@@ -291,17 +291,17 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
         case NVM_IO_PROCESS:
             break;
         case NVM_IO_FAIL:
-            req->status = NVME_DATA_TRAS_ERROR;
+            req->status = NVME_CMD_ABORT_REQ;
             nvm_complete_to_host(cmd);
-            return NVME_DATA_TRAS_ERROR;
+            return NVME_CMD_ABORT_REQ;
         case NVM_IO_SUCCESS:
             req->status = NVME_SUCCESS;
             nvm_complete_to_host(cmd);
             return NVME_SUCCESS;
         default:
-            req->status = NVME_INTERNAL_DEV_ERROR;
+            req->status = NVME_CMD_ABORT_REQ;
             nvm_complete_to_host(cmd);
-            return NVME_INTERNAL_DEV_ERROR;
+            return NVME_CMD_ABORT_REQ;
     }
 
 #if LIGHTNVM
@@ -311,9 +311,9 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 
     if (aux_ch >= core.nvm_ch_count) {
         syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
-        req->status = NVME_INTERNAL_DEV_ERROR;
+        req->status = NVME_CMD_ABORT_REQ;
         nvm_complete_to_host(cmd);
-        return NVME_INTERNAL_DEV_ERROR;
+        return NVME_CMD_ABORT_REQ;
     }
 
     for (i = 1; i < cmd->n_sec; i++) {
@@ -335,9 +335,9 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
             break;
         }
         syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
-        req->status = NVME_INTERNAL_DEV_ERROR;
+        req->status = NVME_CMD_ABORT_REQ;
         nvm_complete_to_host(cmd);
-        return NVME_INTERNAL_DEV_ERROR;
+        return NVME_CMD_ABORT_REQ;
     }
 #endif /* LIGHTNVM */
 
@@ -360,7 +360,7 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
     if (core.debug)
         usleep (150000);
 
-    return (retry) ? NVME_NO_COMPLETE : NVME_INTERNAL_DEV_ERROR;
+    return (retry) ? NVME_NO_COMPLETE : NVME_CMD_ABORT_REQ;
 }
 
 int nvm_dma (void *ptr, uint64_t prp, ssize_t size, uint8_t direction)
@@ -388,15 +388,14 @@ int nvm_dma (void *ptr, uint64_t prp, ssize_t size, uint8_t direction)
 int nvm_submit_mmgr (struct nvm_mmgr_io_cmd *cmd)
 {
     gettimeofday(&cmd->tstart,NULL);
+    cmd->cmdtype = cmd->nvm_io->cmdtype;
+
     switch (cmd->nvm_io->cmdtype) {
         case MMGR_WRITE_PG:
-            cmd->cmdtype = MMGR_WRITE_PG;
             return cmd->nvm_io->channel->mmgr->ops->write_pg(cmd);
         case MMGR_READ_PG:
-            cmd->cmdtype = MMGR_READ_PG;
             return cmd->nvm_io->channel->mmgr->ops->read_pg(cmd);
         case MMGR_ERASE_BLK:
-            cmd->cmdtype = MMGR_ERASE_BLK;
             return cmd->nvm_io->channel->mmgr->ops->erase_blk(cmd);
         default:
             return -1;
@@ -1030,7 +1029,7 @@ int nvm_init_ctrl (int argc, char **argv)
         pthread_create(&mode_t, NULL, modet_fn, NULL);
         pthread_join(mode_t, NULL);
     }
-    
+
     while(1) { usleep(NVM_SEC); }
 
     goto OUT;

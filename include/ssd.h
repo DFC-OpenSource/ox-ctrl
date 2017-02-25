@@ -53,7 +53,7 @@
 #define NVM_QUEUE_RETRY         16
 #define NVM_QUEUE_RETRY_SLEEP   500
 #define NVM_FTL_QUEUE_SIZE      64
-#define NVM_FTL_QUEUE_TO        100000
+#define NVM_FTL_QUEUE_TO        1000000
 
 #define NVM_SYNCIO_TO          10
 #define NVM_SYNCIO_FLAG_BUF    0x1
@@ -76,6 +76,11 @@
 
 #define log_err(format, ...)         syslog(LOG_ERR, format, ## __VA_ARGS__)
 #define log_info(format, ...)        syslog(LOG_INFO, format, ## __VA_ARGS__)
+
+#define TV_ELAPSED_USEC(tvs,tve,usec) do {                              \
+        (usec) = ((tve).tv_sec*(uint64_t)1000000+(tve).tv_usec) -       \
+        ((tvs).tv_sec*(uint64_t)1000000+(tvs).tv_usec);                 \
+} while ( 0 )
 
 struct nvm_ppa_addr {
     /* Generic structure for all addresses */
