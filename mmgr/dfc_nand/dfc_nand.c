@@ -43,9 +43,11 @@
 static atomic_t             nextprp;
 static pthread_mutex_t      prp_mutex;
 static pthread_mutex_t      prpmap_mutex;
+static pthread_mutex_t      *bsymap_mutex;
 static uint64_t             prp_map;
 struct nvm_mmgr             dfcnand;
-struct ox_mq                *nand_mq;
+static struct ox_mq         *nand_mq;
+static uint32_t             *ch_bsymap;
 
 extern struct core_struct core;
 
@@ -185,7 +187,7 @@ static void dfcnand_process_cq (void *opaque)
 
 static void dfcnand_process_to (void **opaque, int counter)
 {
-    /* Timeout is current disabled */
+    /* Nothing to do */
 }
 
 static int dfcnand_start_mq (void)
@@ -197,7 +199,7 @@ static int dfcnand_start_mq (void)
     if (!mq_config)
         return EMEM;
 
-    mq_config->n_queues = 8;
+    mq_config->n_queues = dfcnand.geometry->n_of_ch;
     mq_config->q_size = 64;
     mq_config->sq_fn = dfcnand_process_sq;
     mq_config->cq_fn = dfcnand_process_cq;
@@ -209,6 +211,51 @@ static int dfcnand_start_mq (void)
         return -1;
 
     return 0;
+}
+
+static int dfcnand_start_ch_traffic (void)
+{
+    int i;
+
+    if (dfcnand.geometry->lun_per_ch > 16) {
+        log_err ("[dfcnand: Channel traffic does not support more than "
+                                                       "16 LUNs per channel\n");
+        return -1;
+    }
+
+    ch_bsymap = calloc(dfcnand.geometry->n_of_ch, sizeof(uint32_t));
+    if (!ch_bsymap)
+        return EMEM;
+
+    bsymap_mutex = malloc(sizeof(pthread_mutex_t) * dfcnand.geometry->n_of_ch);
+    if (!bsymap_mutex) {
+        free(ch_bsymap);
+        return EMEM;
+    }
+
+    for (i = 0; i < dfcnand.geometry->n_of_ch; i++)
+        pthread_mutex_init (&bsymap_mutex[i], NULL);
+
+    return 0;
+}
+
+inline static void dfcnand_ch_traffic_ctrl (struct nvm_mmgr_io_cmd *cmd)
+{
+    io_cmd *nandcmd = (struct io_cmd *) cmd->rsvd;
+    int shift = cmd->ppa.g.lun * dfcnand.geometry->n_of_planes + cmd->ppa.g.pl;
+
+    pthread_mutex_lock(&bsymap_mutex[cmd->ppa.g.ch]);
+
+    /* check if lun is busy, if yes, command has to block the channel */
+    nandcmd->dfc_io.rdy_bsy = (ch_bsymap[cmd->ppa.g.ch] & (1 << shift))
+                                    ? DFCNAND_RDY_BSY_ON : DFCNAND_RDY_BSY_OFF;
+
+    /* if channel is blocked, other luns are ready */
+    ch_bsymap[cmd->ppa.g.ch] = (nandcmd->dfc_io.rdy_bsy) ?
+                                (0x0 & 0xffffffff) | (1 << shift) :
+                                ch_bsymap[cmd->ppa.g.ch] | (1 << shift);
+
+    pthread_mutex_unlock(&bsymap_mutex[cmd->ppa.g.ch]);
 }
 
 static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
@@ -263,6 +310,8 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
             goto CLEAN;
     }
     cmd->col_addr = 0x0;
+
+    dfcnand_ch_traffic_ctrl(cmd_nvm);
 
     if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
@@ -332,6 +381,8 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
             goto CLEAN;
     }
 
+    dfcnand_ch_traffic_ctrl(cmd_nvm);
+
     if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
@@ -360,6 +411,8 @@ static int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
     cmd->len[0] = 0;
     cmd->dfc_io.cmd_type = MMGR_ERASE_BLK;
 
+    dfcnand_ch_traffic_ctrl(cmd_nvm);
+
     if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
@@ -381,7 +434,10 @@ static void dfcnand_exit (struct nvm_mmgr *mmgr)
     for (i = 0; i < mmgr->geometry->n_of_ch; i++) {
         free(mmgr->ch_info->mmgr_rsv_list);
         free(mmgr->ch_info->ftl_rsv_list);
+        pthread_mutex_destroy(&bsymap_mutex[i]);
     }
+    free(ch_bsymap);
+    free(bsymap_mutex);
 }
 
 static int dfcnand_io_rsv_blk (struct nvm_channel *ch, uint8_t cmdtype,
@@ -565,15 +621,13 @@ static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 int dfcnand_callback(io_cmd *cmd)
 {
     struct ox_mq_entry *mq_entry = (struct ox_mq_entry *) cmd->dfc_io.mq_req;
-
     ox_mq_complete_req (nand_mq, mq_entry);
 }
 
 static int dfcnand_complete(io_cmd *cmd)
 {
     int ret = 0;
-    struct nvm_mmgr_io_cmd *nvm_cmd =
-                           (struct nvm_mmgr_io_cmd *) cmd->dfc_io.nvm_mmgr_io;
+    struct nvm_mmgr_io_cmd *nvm_cmd = cmd->dfc_io.nvm_mmgr_io;
 
     if (nvm_memcheck(nvm_cmd))
         goto OUT;
@@ -631,12 +685,15 @@ int mmgr_dfcnand_init()
     ret = nand_dm_init();
     if (ret) {
         syslog(LOG_ERR, "dfcnand: Not possible to start NAND manager.");
-        return -1;
+        return EMMGR_REGISTER;
     }
     ret = dfcnand_start_prp_map();
     if (ret) return ret;
 
     ret = dfcnand_start_mq();
+    if (ret) return ret;
+
+    ret = dfcnand_start_ch_traffic();
     if (ret) return ret;
 
     return nvm_register_mmgr(&dfcnand);

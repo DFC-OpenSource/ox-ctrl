@@ -17,6 +17,9 @@
 
 #define DFCNAND_DMA_SLOT_INDEX  64
 
+#define DFCNAND_RDY_BSY_ON      (1 << 3)
+#define DFCNAND_RDY_BSY_OFF     0x0
+
 enum DFCNAND_COMMAND_ID {
     DFCNAND_PAGE_PROG           = 0xA,
     DFCNAND_PAGE_READ           = 0x1E,
@@ -44,6 +47,7 @@ struct dfcnand_io {
     uint8_t                  cmd_type;
     struct nvm_mmgr_io_cmd   *nvm_mmgr_io;
     void                     *mq_req;
+    uint8_t                  rdy_bsy; /* if positive, waits for ready signal */
 };
 
 #endif /* DFC_NAND_H */

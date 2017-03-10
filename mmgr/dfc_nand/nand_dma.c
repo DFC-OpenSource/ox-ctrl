@@ -90,6 +90,7 @@ int nand_page_prog(io_cmd *cmd_buf) {
     cmd_struct->oob_len_MSB = cmd_buf->len[4] << 20 | ((cmd_buf->host_addr[4]
                                                             >> 32) & 0xfffff);
     if ((fpga_version == 0x00030100) || (fpga_version == 0x00030004)) {
+    /* R */ /*
         if (!(cmd_buf->lun) && !(cmd_buf->target) && !(cmd_buf->block & 0x1)) {
             cmd_struct->control_fields = PAGE_PROG << 5 |
                                     (!(cmd_buf->block % 2)) << 4 | 4 << 1 | 0;
@@ -97,6 +98,9 @@ int nand_page_prog(io_cmd *cmd_buf) {
             cmd_struct->control_fields = PAGE_PROG << 5 |
                                             (!(cmd_buf->block % 2)) << 4 | 0;
         }
+    */
+    /* N */    cmd_struct->control_fields = PAGE_PROG << 5 |
+                    (!(cmd_buf->block % 2)) << 4 | cmd_buf->dfc_io.rdy_bsy | 0;
     } else if (fpga_version == 0x00020502) {
         if (!(cmd_buf->lun) && !(cmd_buf->target)) {
             cmd_struct->control_fields = PAGE_PROG << 5 |
@@ -133,7 +137,8 @@ int nand_page_read(io_cmd *cmd_buf) {
     cmd_struct->oob_LSB = cmd_buf->host_addr[4] & 0xffffffff;
     cmd_struct->oob_len_MSB = cmd_buf->len[4] << 20 |
                                     ((cmd_buf->host_addr[4] >> 32) & 0xfffff);
-    cmd_struct->control_fields = PAGE_READ << 5 | 4 << 1 | 1;
+    /* M */ cmd_struct->control_fields = PAGE_READ << 5 |
+                                                   cmd_buf->dfc_io.rdy_bsy | 1;
 
     make_desc(cmd_struct, cmd_buf->chip, READ_IO, cmd_buf);
 
@@ -160,7 +165,8 @@ int nand_block_erase(io_cmd *cmd_buf) {
     cmd_struct->db_LSB_0 = 0;
     cmd_struct->db_MSB_0 = 0;
     cmd_struct->len1_len0 = 0x2;
-    cmd_struct->control_fields = READ_STATUS << 5 | 1 << 3 | 1 << 2 | 1;
+    /* M */ cmd_struct->control_fields = READ_STATUS << 5 |
+                                          cmd_buf->dfc_io.rdy_bsy | 1 << 2 | 1;
     make_desc(cmd_struct, cmd_buf->chip, READ_STS, cmd_buf);
 
     /* R */ //free(cmd_struct); /**/
