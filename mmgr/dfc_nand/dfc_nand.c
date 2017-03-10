@@ -197,7 +197,7 @@ static int dfcnand_start_mq (void)
     if (!mq_config)
         return EMEM;
 
-    mq_config->n_queues = 1;
+    mq_config->n_queues = 8;
     mq_config->q_size = 64;
     mq_config->sq_fn = dfcnand_process_sq;
     mq_config->cq_fn = dfcnand_process_cq;
@@ -264,7 +264,7 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
     }
     cmd->col_addr = 0x0;
 
-    if (ox_mq_submit_req(nand_mq, 0, cmd))
+    if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
     return 0;
@@ -332,7 +332,7 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
             goto CLEAN;
     }
 
-    if (ox_mq_submit_req(nand_mq, 0, cmd))
+    if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
     return 0;
@@ -360,7 +360,7 @@ static int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
     cmd->len[0] = 0;
     cmd->dfc_io.cmd_type = MMGR_ERASE_BLK;
 
-    if (ox_mq_submit_req(nand_mq, 0, cmd))
+    if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
     return 0;
