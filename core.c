@@ -220,7 +220,7 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
     mq_config->flags = OX_MQ_TO_COMPLETE;
     ftl->mq = ox_mq_init(mq_config);
     if (!ftl->mq)
-        return -1;
+        return EFTL_REGISTER;
 
     core.ftl_q_count += ftl->nq;
 
@@ -526,7 +526,7 @@ int nvm_submit_sync_io (struct nvm_channel *ch, struct nvm_mmgr_io_cmd *cmd,
             ret = mmgr->ops->erase_blk(cmd);
             break;
         default:
-            ret = -1;
+            ret = ESYNC_IO;
     }
 
     if (core.debug)
@@ -547,7 +547,7 @@ int nvm_submit_sync_io (struct nvm_channel *ch, struct nvm_mmgr_io_cmd *cmd,
             cmd->status = NVM_IO_TIMEOUT;
             nvm_sync_io_free (flags, buf, cmd);
             log_err ("[nvm: Sync IO cmd 0x%x TIMEOUT. Aborted.]\n",cmd->cmdtype);
-            return -1;
+            return ESYNC_IO;
         }
         pthread_mutex_lock(cmd->sync_mutex);
         i = atomic_read(cmd->sync_count);
@@ -556,7 +556,7 @@ int nvm_submit_sync_io (struct nvm_channel *ch, struct nvm_mmgr_io_cmd *cmd,
             usleep(1);
     } while (i || cmd->status == NVM_IO_PROCESS);
 
-    ret = (cmd->status == NVM_IO_SUCCESS) ? 0 : -1;
+    ret = (cmd->status == NVM_IO_SUCCESS) ? 0 : ESYNC_IO;
 
     flags ^= NVM_SYNCIO_FLAG_DEC;
     nvm_sync_io_free (flags, buf, cmd);
@@ -568,7 +568,7 @@ ERR:
     log_err ("%s",err);
     if (core.debug) printf ("%s",err);
 
-    return -1;
+    return ESYNC_IO;
 }
 
 void *nvm_sub_pl_sio_th (void *arg)
@@ -914,6 +914,9 @@ static void nvm_printerror (int error)
         case EMEM:
             log_err ("nvm: Memory error.\n");
             break;
+        case ESYNC_IO:
+            log_err ("nvm: Synchronous IO failed.\n");
+            break;
         default:
             log_err ("nvm: unknown error.\n");
     }
@@ -1034,7 +1037,7 @@ int nvm_init_ctrl (int argc, char **argv)
 
     goto OUT;
 CLEAN:
-    printf(" ERROR. Aborting. Check log file.\n");
+    printf(" ERROR 0x%x. Aborting. Check log file.\n", ret);
     nvm_printerror(ret);
     nvm_clean_all();
     return -1;

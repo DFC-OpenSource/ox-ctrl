@@ -190,6 +190,7 @@ enum NVM_ERROR {
     ENVME_REGISTER   = 0x9,
     ECH_CONFIG       = 0xe,
     EMEM             = 0xf,
+    ESYNC_IO         = 0x8,
 };
 
 enum {
