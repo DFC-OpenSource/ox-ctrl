@@ -69,7 +69,7 @@
 #include <signal.h>
 #include <setjmp.h>
 #include <argp.h>
-#include <time.h>
+#include <sys/time.h>
 #include "include/uatomic.h"
 #include "include/ox-mq.h"
 
@@ -636,8 +636,8 @@ static void nvm_unregister_ftl (struct nvm_ftl *ftl)
     if (LIST_EMPTY(&ftl_head))
         return;
 
-    free (ftl->mq->config);
     ox_mq_destroy(ftl->mq);
+    free (ftl->mq->config);
     core.ftl_q_count -= ftl->nq;
 
     ftl->active = 0;
@@ -837,13 +837,16 @@ static void nvm_clean_all ()
     struct nvm_ftl *ftl;
     struct nvm_mmgr *mmgr;
 
-    /* Clean all media managers */
-    if (core.run_flag & RUN_MMGR) {
-        while (core.mmgr_count) {
-            mmgr = LIST_FIRST(&mmgr_head);
-            nvm_unregister_mmgr(mmgr);
-        };
-        core.run_flag ^= RUN_MMGR;
+    /* Clean PCIe handler */
+    if(core.nvm_pcie && (core.run_flag & RUN_PCIE)) {
+        core.nvm_pcie->ops->exit();
+        core.run_flag ^= RUN_PCIE;
+    }
+
+    /* Clean channels */
+    if (core.run_flag & RUN_CH) {
+        free(core.nvm_ch);
+        core.run_flag ^= RUN_CH;
     }
 
     /* Clean all ftls */
@@ -855,16 +858,13 @@ static void nvm_clean_all ()
         core.run_flag ^= RUN_FTL;
     }
 
-    /* Clean channels */
-    if (core.run_flag & RUN_CH) {
-        free(core.nvm_ch);
-        core.run_flag ^= RUN_CH;
-    }
-
-    /* Clean PCIe handler */
-    if(core.nvm_pcie && (core.run_flag & RUN_PCIE)) {
-        core.nvm_pcie->ops->exit();
-        core.run_flag ^= RUN_PCIE;
+    /* Clean all media managers */
+    if (core.run_flag & RUN_MMGR) {
+        while (core.mmgr_count) {
+            mmgr = LIST_FIRST(&mmgr_head);
+            nvm_unregister_mmgr(mmgr);
+        };
+        core.run_flag ^= RUN_MMGR;
     }
 
     /* Clean Nvme */

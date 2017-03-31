@@ -432,8 +432,8 @@ static void dfcnand_exit (struct nvm_mmgr *mmgr)
     pthread_mutex_destroy(&prp_mutex);
     pthread_mutex_destroy(&prpmap_mutex);
     for (i = 0; i < mmgr->geometry->n_of_ch; i++) {
-        free(mmgr->ch_info->mmgr_rsv_list);
-        free(mmgr->ch_info->ftl_rsv_list);
+        free(mmgr->ch_info[i].mmgr_rsv_list);
+        free(mmgr->ch_info[i].ftl_rsv_list);
         pthread_mutex_destroy(&bsymap_mutex[i]);
     }
     free(ch_bsymap);
@@ -571,6 +571,7 @@ static int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
 static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
     int i, n, pl, nsp = 0, trsv;
+    struct nvm_ppa_addr *ppa;
 
     for (i = 0; i < nc; i++) {
         ch[i].ch_mmgr_id = i;
@@ -592,7 +593,6 @@ static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
                        NAND_PLANE_COUNT *
                        NAND_PAGE_COUNT;
 
-
         ch[i].mmgr_rsv = DFCNAND_RESV_BLK_COUNT;
         trsv = ch[i].mmgr_rsv * NAND_PLANE_COUNT;
         ch[i].mmgr_rsv_list = malloc (trsv * sizeof(struct nvm_ppa_addr));
@@ -604,10 +604,18 @@ static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 
         for (n = 0; n < ch[i].mmgr_rsv; n++) {
             for (pl = 0; pl < NAND_PLANE_COUNT; pl++) {
-                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.blk = n;
-                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.pl = pl;
+                ppa = &ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl];
+                ppa->g.ch = ch[i].ch_mmgr_id;
+                ppa->g.lun = 0;
+                ppa->g.blk = n;
+                ppa->g.pl = pl;
             }
         }
+
+        ch[i].ftl_rsv = 0;
+        ch[i].ftl_rsv_list = malloc (sizeof(struct nvm_ppa_addr));
+        if (!ch[i].ftl_rsv_list)
+            return EMEM;
 
         ch[i].tot_bytes = 0;
         ch[i].slba = 0;

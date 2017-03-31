@@ -542,7 +542,6 @@ int lnvm_init(NvmeCtrl *n)
     log_info("    [lnvm: Pages per Block: %d]\n",c->num_pg);
     log_info("    [lnvm: Planes: %d]\n",c->num_pln);
     log_info("    [lnvm: Total Blocks: %lu]\n", tot_blks);
-    log_info("    [lnvm: Reserved/Bad Blocks: %lu]\n", rsv_blks);
     log_info("    [lnvm: Total Pages: %lu]\n",c->num_pg * tot_blks
                                                                 * c->num_pln);
     log_info("    [lnvm: Page size: %d bytes]\n",c->fpg_sz);

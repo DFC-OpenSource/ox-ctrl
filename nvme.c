@@ -84,7 +84,7 @@ static void nvme_set_default (NvmeCtrl *n)
 #endif /* LIGHTNVM */
 }
 
-inline void nvme_regs_setup (NvmeCtrl *n)
+void nvme_regs_setup (NvmeCtrl *n)
 {
     memcpy (&n->nvme_regs, (uint64_t *)(nvm_pcie->nvme_regs), sizeof(NvmeRegs));
 
@@ -201,8 +201,6 @@ static int nvme_init_ctrl (NvmeCtrl *n)
     if (!n->elpes || !n->aer_reqs)
         return EMEM;
 
-    LIST_INIT (&n->ext_list);
-
     memset(&n->stat, 0, sizeof(NvmeStats));
 
     return 0;
@@ -318,7 +316,7 @@ uint16_t nvme_init_cq (NvmeCQ *cq, NvmeCtrl *n, uint64_t dma_addr,
                     uint16_t cqid, uint16_t vector, uint16_t size,
                     uint16_t irq_enabled, int contig)
 {
-    uint64_t cq_base = NULL;
+    uint64_t cq_base = 0;
     int fd_qmem = 0;
 
     if (dma_addr) {
@@ -529,7 +527,6 @@ inline void nvme_free_cq (NvmeCQ *cq, NvmeCtrl *n)
 static void nvme_clear_ctrl (NvmeCtrl *n)
 {
     NvmeAsyncEvent *event;
-    NvmeRequest *req;
     int i;
 
     if (!n->running) {
@@ -553,21 +550,13 @@ static void nvme_clear_ctrl (NvmeCtrl *n)
 	}
     }
 
-    /* Free requests allocated later */
-    while (!LIST_EMPTY(&n->ext_list)) {
-        req = LIST_FIRST (&n->ext_list);
-        if (req) {
-            LIST_REMOVE (req, ext_req);
-            free (req);
-        }
-    }
-
-    pthread_spin_lock(&n->aer_req_spin);
+    pthread_mutex_lock(&n->aer_req_mutex);
     while((event = (NvmeAsyncEvent *)TAILQ_FIRST(&n->aer_queue)) != NULL) {
         TAILQ_REMOVE(&n->aer_queue, event, entry);
         FREE_VALID(event);
     }
-    pthread_spin_unlock(&n->aer_req_spin);
+    pthread_mutex_unlock(&n->aer_req_mutex);
+
     n->nvme_regs.vBar.cc = 0;
     n->nvme_regs.vBar.csts = 0;
     n->features.temp_thresh = 0x14d;
@@ -751,7 +740,7 @@ static void nvme_update_shadowregs(NvmeQSched *qs)
             }
         }
     }
-    pthread_spin_lock(&n->qs_req_spin);
+    pthread_mutex_lock(&n->qs_req_mutex);
     for(i = 0; i < NVME_MAX_PRIORITY; i++) {
     	if(qs->prio_avail[i]) {
             qs->shadow_regs[i][0] |= (((((uint64_t)status_regs[1]) << 32) +
@@ -760,7 +749,7 @@ static void nvme_update_shadowregs(NvmeQSched *qs)
                                         status_regs[2]) & qs->mask_regs[i][1]);
 	}
     }
-    pthread_spin_unlock(&n->qs_req_spin);
+    pthread_mutex_unlock(&n->qs_req_mutex);
 }
 
 static int nvme_get_best_sqid(NvmeQSched *qs)
@@ -893,9 +882,9 @@ void nvme_enqueue_event (NvmeCtrl *n, uint8_t event_type,
     event->result.event_info = event_info;
     event->result.log_page   = log_page;
 
-    pthread_spin_lock(&n->aer_req_spin);
+    pthread_mutex_lock(&n->aer_req_mutex);
     TAILQ_INSERT_TAIL (&n->aer_queue, event, entry);
-    pthread_spin_unlock(&n->aer_req_spin);
+    pthread_mutex_unlock(&n->aer_req_mutex);
 }
 
 void nvme_post_cqes (void *opaque)
@@ -916,7 +905,7 @@ void nvme_post_cqes (void *opaque)
     nvm_pcie->ops->isr_notify(cq);
 }
 
-inline void nvme_set_error_page (NvmeCtrl *n, uint16_t sqid, uint16_t cid,
+void nvme_set_error_page (NvmeCtrl *n, uint16_t sqid, uint16_t cid,
 		uint16_t status, uint16_t location, uint64_t lba, uint32_t nsid)
 {
     /* TODO: Not completely implemented */
@@ -1172,7 +1161,7 @@ JUMP:
         nvme_update_sq_tail (sq);
 	if (nvme_sq_empty(sq)) {
             reg_sqid = sq->sqid - 1;
-            pthread_spin_lock(&n->qs_req_spin);
+            pthread_mutex_lock(&n->qs_req_mutex);
             if(n->qsched.WRR) {
 		n->qsched.shadow_regs[sq->prio][reg_sqid >> 6] &=
                                                            (~(1UL << reg_sqid));
@@ -1180,7 +1169,7 @@ JUMP:
 		n->qsched.round_robin_status_regs[reg_sqid >> 5] &=
                                                            (~(1UL << reg_sqid));
             }
-            pthread_spin_unlock(&n->qs_req_spin);
+            pthread_mutex_unlock(&n->qs_req_mutex);
 	}
     }
     sq->completed += processed;
@@ -1268,9 +1257,9 @@ static void round_robin (NvmeCtrl *n)
     n_regs = ((qs->n_active_iosqs - 1) >> 5) + 1;
     for(i = 0; i < n_regs; i++) {
     	status_reg = *(qs->iodbst_reg + i);
-    	pthread_spin_lock(&n->qs_req_spin);
+    	pthread_mutex_lock(&n->qs_req_mutex);
     	qs->round_robin_status_regs[i] |= status_reg;
-    	pthread_spin_unlock(&n->qs_req_spin);
+    	pthread_mutex_unlock(&n->qs_req_mutex);
 
     	base = i << 5;
 	limit = (qs->n_active_iosqs < (base + 32)) ?
@@ -1308,7 +1297,7 @@ static inline int nvme_init_q_scheduler (NvmeCtrl *n)
     NvmeQSched *qs = &n->qsched;
     int i;
 
-    if(pthread_spin_init(&n->qs_req_spin,0)) {
+    if(pthread_mutex_init(&n->qs_req_mutex, 0)) {
 	log_err("[ERROR nvme: qs spin not initialized.]\n");
         return -1;
     }
@@ -1340,8 +1329,8 @@ void nvme_exit()
 #endif /* LIGHTNVM */
 
     pthread_mutex_destroy(&n->req_mutex);
-    pthread_spin_destroy(&n->qs_req_spin);
-    pthread_spin_destroy(&n->aer_req_spin);
+    pthread_mutex_destroy(&n->qs_req_mutex);
+    pthread_mutex_destroy(&n->aer_req_mutex);
 }
 
 int nvme_init(NvmeCtrl *n)

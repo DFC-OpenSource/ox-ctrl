@@ -33,7 +33,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <string.h>
-#include <time.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/queue.h>
