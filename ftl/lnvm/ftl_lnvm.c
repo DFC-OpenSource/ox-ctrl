@@ -1,6 +1,8 @@
 /* OX: Open-Channel NVM Express SSD Controller
  *
- *  - LightNVM Flash Translation Layer (NVMe to MMGR translation only)
+ *  - LightNVM Flash Translation Layer
+ *    - LightNVM to NAND translation;
+ *    - Bad Block Table Management;
  *
  * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
  * Written by Ivan Luiz Picoli <ivpi@itu.dk>
@@ -286,14 +288,17 @@ static int lnvm_submit_io (struct nvm_io_cmd *cmd)
 
 static int lnvm_init_channel (struct nvm_channel *ch)
 {
-    struct lnvm_channel *lch;
     uint32_t tblks;
-    int rsv, l_addr, b_addr, pl_addr, trsv, n, pl, n_pl;
+    int ret, trsv, n, pl, n_pl;
+    struct lnvm_channel *lch;
+    struct lnvm_bbtbl *bbt;
+    struct nvm_ppa_addr *ppa;
 
     n_pl = ch->geometry->n_of_planes;
-    ch->ftl_rsv = FTL_LNVM_RSV_BLK;
+    ch->ftl_rsv = FTL_LNVM_RSV_BLK_COUNT;
     trsv = ch->ftl_rsv * n_pl;
-    ch->ftl_rsv_list = malloc (trsv * sizeof(struct nvm_ppa_addr));
+    ch->ftl_rsv_list = realloc (ch->ftl_rsv_list,
+                                           trsv * sizeof(struct nvm_ppa_addr));
 
     if (!ch->ftl_rsv_list)
         return EMEM;
@@ -302,8 +307,11 @@ static int lnvm_init_channel (struct nvm_channel *ch)
 
     for (n = 0; n < ch->ftl_rsv; n++) {
         for (pl = 0; pl < n_pl; pl++) {
-            ch->ftl_rsv_list[n_pl * n + pl].g.blk = n + ch->mmgr_rsv;
-            ch->ftl_rsv_list[n_pl * n + pl].g.pl = pl;
+            ppa = &ch->ftl_rsv_list[n_pl * n + pl];
+            ppa->g.ch = ch->ch_mmgr_id;
+            ppa->g.lun = 0;
+            ppa->g.blk = n + ch->mmgr_rsv;
+            ppa->g.pl = pl;
         }
     }
 
@@ -314,38 +322,48 @@ static int lnvm_init_channel (struct nvm_channel *ch)
     tblks = ch->geometry->blk_per_lun * ch->geometry->lun_per_ch * n_pl;
 
     lch->ch = ch;
-    lch->bbtbl = malloc (sizeof(uint8_t) * tblks);
+
+    ret = EMEM;
+    lch->bbtbl = malloc (sizeof(struct lnvm_bbtbl));
     if (!lch->bbtbl)
-        return EMEM;
+        goto FREE_LCH;
 
-    memset (lch->bbtbl, 0, tblks);
+    bbt = lch->bbtbl;
+    bbt->tbl = malloc (sizeof(uint8_t) * tblks);
+    if (!bbt->tbl)
+        goto FREE_BBTBL;
 
-    /* TODO: Verify if bbtbl exists in non-volatile storage
-             if not, create it and flush to nvm
-             get bbtbl from non-volatile storage
-             flush bbtbl to nvm when get a set_bb_tbl with ppa sector > 0
-             move the loopings below to a bbtbl create fn */
+    memset (bbt->tbl, 0, tblks);
+    bbt->magic = 0;
+    bbt->bb_sz = tblks;
 
-    /* Set FTL reserved bad blocks */
-    for (rsv = 0; rsv < ch->ftl_rsv * n_pl; rsv++){
-        l_addr = ch->ftl_rsv_list[rsv].g.lun * ch->geometry->blk_per_lun * n_pl;
-        b_addr = ch->ftl_rsv_list[rsv].g.blk * n_pl;
-        pl_addr = ch->ftl_rsv_list[rsv].g.pl;
-        lch->bbtbl[l_addr + b_addr + pl_addr] = 0x1;
-    }
+    ret = lnvm_get_bbt_nvm(lch, bbt);
+    if (ret) goto ERR;
 
-    /* Set MMGR reserved bad blocks */
-    for (rsv = 0; rsv < ch->mmgr_rsv  * n_pl; rsv++){
-        l_addr = ch->mmgr_rsv_list[rsv].g.lun * ch->geometry->blk_per_lun*n_pl;
-        b_addr = ch->mmgr_rsv_list[rsv].g.blk * n_pl;
-        pl_addr = ch->mmgr_rsv_list[rsv].g.pl;
-        lch->bbtbl[l_addr + b_addr + pl_addr] = 0x1;
+    /* create and flush bad block table if it does not exist */
+    /* this procedure will erase the entire device (only in test mode) */
+    if (bbt->magic == FTL_LNVM_MAGIC) {
+        printf(" [lnvm: Channel %d. Creating bad block table...\n", ch->ch_id);
+        ret = lnvm_bbt_create (lch, bbt);
+        if (ret) goto ERR;
+        ret = lnvm_flush_bbt (lch, bbt);
+        if (ret) goto ERR;
     }
 
     LIST_INSERT_HEAD(&ch_head, lch, entry);
     log_info("    [lnvm: channel %d started with %d bad blocks.\n",ch->ch_id,
-                                                    ch->mmgr_rsv+ch->ftl_rsv);
+                                                                bbt->bb_count);
     return 0;
+
+ERR:
+    free(bbt->tbl);
+FREE_BBTBL:
+    free(bbt);
+FREE_LCH:
+    free(lch);
+    log_err("[lnvm ERR: Ch %d -> Not possible to read/create bad block "
+                                                        "table.\n", ch->ch_id);
+    return ret;
 }
 
 static int lnvm_ftl_get_bbtbl (struct nvm_ppa_addr *ppa, uint8_t *bbtbl,
@@ -353,21 +371,22 @@ static int lnvm_ftl_get_bbtbl (struct nvm_ppa_addr *ppa, uint8_t *bbtbl,
 {
     struct lnvm_channel *lch = lnvm_get_ch_instance(ppa->g.ch);
     struct nvm_channel *ch = lch->ch;
-    int l_addr = ppa->g.lun * ch->geometry->blk_per_lun;
+    int l_addr = ppa->g.lun * ch->geometry->blk_per_lun *
+                                                     ch->geometry->n_of_planes;
 
     if (nvm_memcheck(bbtbl) || nvm_memcheck(ch) ||
                                         nb != ch->geometry->blk_per_lun *
                                         (ch->geometry->n_of_planes & 0xffff))
         return -1;
 
-    memcpy(bbtbl, &lch->bbtbl[l_addr], nb);
+    memcpy(bbtbl, &lch->bbtbl->tbl[l_addr], nb);
 
     return 0;
 }
 
 static int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint8_t value)
 {
-    int l_addr, n_pl;
+    int l_addr, n_pl, flush, ret;
     struct lnvm_channel *lch = lnvm_get_ch_instance(ppa->g.ch);
 
     n_pl = lch->ch->geometry->n_of_planes;
@@ -377,7 +396,17 @@ static int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint8_t value)
         return -1;
 
     l_addr = ppa->g.lun * lch->ch->geometry->blk_per_lun * n_pl;
-    lch->bbtbl[l_addr + (ppa->g.blk * n_pl + ppa->g.pl)] = value;
+
+    /* flush the table if the value changes */
+    flush = (lch->bbtbl->tbl[l_addr+(ppa->g.blk * n_pl + ppa->g.pl)] == value)
+                                                                        ? 0 : 1;
+    lch->bbtbl->tbl[l_addr + (ppa->g.blk * n_pl + ppa->g.pl)] = value;
+
+    if (flush) {
+        ret = lnvm_flush_bbt (lch, lch->bbtbl);
+        if (ret)
+            log_info("[ftl WARNING: Error flushing bad block table to NVM!]");
+    }
 
     return 0;
 }
@@ -385,15 +414,16 @@ static int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint8_t value)
 static void lnvm_exit (struct nvm_ftl *ftl)
 {
     struct lnvm_channel *lch;
+
     LIST_FOREACH(lch, &ch_head, entry){
+        free(lch->bbtbl->tbl);
         free(lch->bbtbl);
     }
-    do {
+    while (!LIST_EMPTY(&ch_head)) {
         lch = LIST_FIRST(&ch_head);
         LIST_REMOVE (lch, entry);
-        free (lch);
-    } while (!LIST_EMPTY(&ch_head));
-
+        free(lch);
+    }
     pthread_mutex_destroy (&endio_mutex);
 }
 

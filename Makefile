@@ -47,7 +47,7 @@ MMGRS_VOLT = $(VOLT)
 
 ### FLASH TRANSLATION LAYERS
 LNVM_FTL_PATH = ftl/lnvm
-LNVM_FTL = $(LNVM_FTL_PATH)/ftl_lnvm.o
+LNVM_FTL = $(LNVM_FTL_PATH)/ftl_lnvm.o $(LNVM_FTL_PATH)/lnvm_bbtbl.o
 CLEAN += $(LNVM_FTL_PATH)/*.o
 #Join flash translation layers in FTLS, only LNVM_FTL for now
 FTLS_DFC = $(LNVM_FTL)
@@ -112,4 +112,4 @@ dfc-volt: $(CORE_VOLT) $(MMGRS_VOLT) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC)
 	$(CC) $(CFLAGS) $(CORE_VOLT) $(MMGRS_VOLT) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC) -o $(NAMEV) -lpthread
 
 clean:
-	rm -f $(CLEAN) $(NAME) $(NAMET)
+	rm -f $(CLEAN) $(NAME) $(NAMET) $(NAMEV)
