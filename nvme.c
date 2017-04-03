@@ -450,7 +450,7 @@ static int nvme_start_ctrl (NvmeCtrl *n)
     uint32_t page_bits = NVME_CC_MPS(n->nvme_regs.vBar.cc) + 12;
     uint32_t page_size = 1 << page_bits;
 
-    syslog(LOG_DEBUG,"[nvme: nvme starting ctrl]\n");
+    syslog(LOG_INFO,"[nvme: nvme starting ctrl]\n");
 
     if (n->cq[0] || n->sq[0] || !n->nvme_regs.vBar.asq ||
                         !n->nvme_regs.vBar.acq ||
@@ -500,13 +500,12 @@ void nvme_free_sq (NvmeSQ *sq, NvmeCtrl *n)
     FREE_VALID (sq->io_req);
     FREE_VALID (sq->prp_list);
 
-    if (sq->dma_addr) {
+    if (sq->dma_addr)
         sq->dma_addr = 0;
-    }
+
     SAFE_CLOSE (sq->fd_qmem);
-    if (sq->sqid) {
+    if (sq->sqid)
 	FREE_VALID (sq);
-    }
 }
 
 inline void nvme_free_cq (NvmeCQ *cq, NvmeCtrl *n)
@@ -529,26 +528,15 @@ static void nvme_clear_ctrl (NvmeCtrl *n)
     NvmeAsyncEvent *event;
     int i;
 
-    if (!n->running) {
-    	/*nvme not in action.. so nothing to stop*/
-	return;
-    }
-    n->running = 0;
-    if (n->sq) {
-        for (i = 0; i < n->num_queues; i++) {
-            if (n->sq[i] != NULL) {
+    if (n->sq)
+        for (i = 0; i < n->num_queues; i++)
+            if (n->sq[i] != NULL)
 		nvme_free_sq (n->sq[i], n);
-            }
-	}
-    }
 
-    if (n->cq) {
-        for (i = 0; i < n->num_queues; i++) {
-            if (n->cq[i] != NULL) {
+    if (n->cq)
+        for (i = 0; i < n->num_queues; i++)
+            if (n->cq[i] != NULL)
 		nvme_free_cq (n->cq[i], n);
-            }
-	}
-    }
 
     pthread_mutex_lock(&n->aer_req_mutex);
     while((event = (NvmeAsyncEvent *)TAILQ_FIRST(&n->aer_queue)) != NULL) {
@@ -597,7 +585,7 @@ void nvme_process_reg (NvmeCtrl *n, uint64_t offset, uint64_t data)
             if (NVME_CC_SHN(data) && !(NVME_CC_SHN(n->nvme_regs.vBar.cc))) {
 		syslog(LOG_DEBUG,"[nvme: Nvme SHN!]\n");
 		n->nvme_regs.vBar.cc = data;
-		nvme_clear_ctrl(n);
+                n->running = 1;
 		n->nvme_regs.vBar.csts |= NVME_CSTS_SHST_COMPLETE;
 		n->nvme_regs.vBar.csts &= ~NVME_CSTS_READY;
 		n->nvme_regs.vBar.cc = 0;
@@ -1331,6 +1319,8 @@ void nvme_exit()
     pthread_mutex_destroy(&n->req_mutex);
     pthread_mutex_destroy(&n->qs_req_mutex);
     pthread_mutex_destroy(&n->aer_req_mutex);
+
+    log_info(" [nvm: NVME standard unregistered.]\n");
 }
 
 int nvme_init(NvmeCtrl *n)
@@ -1360,7 +1350,6 @@ int nvme_init(NvmeCtrl *n)
         return ENVME_REGISTER;
     syslog (LOG_INFO,"  [nvm: LightNVM is registered]\n");
 #endif /* LIGHTNVM */
-    n->running = 1;
     log_info("  [nvm: NVME standard registered]\n");
     return 0;
 }

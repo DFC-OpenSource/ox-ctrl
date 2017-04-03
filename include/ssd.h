@@ -265,6 +265,7 @@ struct nvm_pcie {
     struct nvm_memory_region    *host_io_mem;     /* host BAR */
     pthread_t                   io_thread;        /* single thread for now */
     uint32_t                    *io_dbstride_ptr; /* for queue scheduling */
+    uint8_t                     running;
 };
 
 /* --- FTL CAPABILITIES BIT OFFSET --- */
@@ -312,7 +313,6 @@ struct nvm_ftl {
     uint16_t                bbtbl_format;
     uint8_t                 nq; /* Number of queues/threads, up to 64 per FTL */
     struct ox_mq            *mq;
-    uint8_t                 active;
     LIST_ENTRY(nvm_ftl)     entry;
 };
 

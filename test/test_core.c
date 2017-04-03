@@ -244,6 +244,8 @@ void *tests_start (void *arg)
     struct tests_set *set;
     struct tests_test *test;
 
+    t_usec = 0;
+
     printf(" \n TESTS STARTED...\n");
     LIST_FOREACH(set, &tests_u.sets_head, entry){
         if (!LIST_EMPTY(&set->tests_head))

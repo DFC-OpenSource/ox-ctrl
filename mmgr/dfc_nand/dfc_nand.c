@@ -192,21 +192,17 @@ static void dfcnand_process_to (void **opaque, int counter)
 
 static int dfcnand_start_mq (void)
 {
-    struct ox_mq_config *mq_config;
+    struct ox_mq_config mq_config;
 
     /* Start NAND multi-queue */
-    mq_config = malloc (sizeof (struct ox_mq_config));
-    if (!mq_config)
-        return EMEM;
-
-    mq_config->n_queues = dfcnand.geometry->n_of_ch;
-    mq_config->q_size = 64;
-    mq_config->sq_fn = dfcnand_process_sq;
-    mq_config->cq_fn = dfcnand_process_cq;
-    mq_config->to_fn = dfcnand_process_to;
-    mq_config->to_usec = 250000;
-    mq_config->flags = 0;
-    nand_mq = ox_mq_init(mq_config);
+    mq_config.n_queues = dfcnand.geometry->n_of_ch;
+    mq_config.q_size = 64;
+    mq_config.sq_fn = dfcnand_process_sq;
+    mq_config.cq_fn = dfcnand_process_cq;
+    mq_config.to_fn = dfcnand_process_to;
+    mq_config.to_usec = 250000;
+    mq_config.flags = 0;
+    nand_mq = ox_mq_init(&mq_config);
     if (!nand_mq)
         return -1;
 
@@ -277,7 +273,7 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
 
-    if (cmd_nvm->sync_count) {
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS)) {
         prp_map = dfcnand_get_next_prp(cmd);
         cmd->dfc_io.virt_addr = virt_addr[prp_map];
         memset(cmd->dfc_io.virt_addr, 0, pg_sz + oob_sz);
@@ -300,9 +296,12 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
     for (c = 0; c < 5; c++) {
         prp_sec           = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
         cmd->len[c]       = (c == 4) ? cmd_nvm->md_sz : sec_sz;
-        cmd->host_addr[c] = (cmd_nvm->sync_count) ?
+        cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
             (uint64_t) phy_addr[prp_map] + sec_sz * c :
             (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
+
+        if ((core.run_flag & RUN_TESTS))
+            continue;
 
         if (!cmd_nvm->sync_count && cmd->host_addr[c] >
                                         core.nvm_pcie->host_io_mem->paddr +
@@ -320,7 +319,7 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
 CLEAN:
     log_err("[MMGR Read ERROR: Failed to enqueue command.]\n");
-    if (cmd_nvm->sync_count)
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
         dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
@@ -345,7 +344,7 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
 
-    if (cmd_nvm->sync_count) {
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS)) {
         prp_map = dfcnand_get_next_prp(cmd);
         cmd->dfc_io.virt_addr = virt_addr[prp_map];
     } else
@@ -363,7 +362,7 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     cmd_nvm->n_sectors = cmd_nvm->pg_sz / sec_sz;
 
-    if (cmd_nvm->sync_count)
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
         if (dfcnand_dma_helper (cmd))
             goto CLEAN;
 
@@ -371,9 +370,12 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
     for (c = 0; c < 5; c++) {
         prp_sec           = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
         cmd->len[c]       = (c == 4) ? cmd_nvm->md_sz : sec_sz;
-        cmd->host_addr[c] = (cmd_nvm->sync_count) ?
+        cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
             (uint64_t) phy_addr[prp_map] + sec_sz * c :
             (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
+
+        if ((core.run_flag & RUN_TESTS))
+            continue;
 
         if (!cmd_nvm->sync_count && cmd->host_addr[c] >
                                         core.nvm_pcie->host_io_mem->paddr +
@@ -390,7 +392,7 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
 CLEAN:
     log_err("[MMGR Write ERROR: Failed to enqueue command.]\n");
-    if (cmd_nvm->sync_count)
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
         dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
@@ -428,6 +430,7 @@ static void dfcnand_exit (struct nvm_mmgr *mmgr)
 {
     int i;
 
+    ox_mq_destroy(nand_mq);
     nand_dm_deinit();
     pthread_mutex_destroy(&prp_mutex);
     pthread_mutex_destroy(&prpmap_mutex);
@@ -644,7 +647,8 @@ static int dfcnand_complete(io_cmd *cmd)
         goto OUT;
 
     if (cmd->status) {
-        if (nvm_cmd->sync_count && cmd->dfc_io.cmd_type == MMGR_READ_PG)
+        if ((nvm_cmd->sync_count || (core.run_flag & RUN_TESTS))
+                                       && cmd->dfc_io.cmd_type == MMGR_READ_PG)
             ret = dfcnand_dma_helper (cmd);
 
         nvm_cmd->status = (ret) ? NVM_IO_FAIL : NVM_IO_SUCCESS;
@@ -652,7 +656,7 @@ static int dfcnand_complete(io_cmd *cmd)
         nvm_cmd->status = NVM_IO_FAIL;
 
 OUT:
-    if (nvm_cmd->sync_count &&
+    if ((nvm_cmd->sync_count || (core.run_flag & RUN_TESTS)) &&
             (cmd->dfc_io.cmd_type == MMGR_WRITE_PG || cmd->dfc_io.cmd_type ==
                                                                   MMGR_READ_PG))
         dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);

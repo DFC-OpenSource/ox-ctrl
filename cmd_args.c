@@ -36,7 +36,7 @@
 #include "include/ssd.h"
 
 extern struct core_struct core;
-const char *argp_program_version = "ox-ctrl v1.2";
+const char *argp_program_version = "ox-ctrl v1.3";
 const char *argp_program_bug_address = "Ivan L. Picoli <ivpi@itu.dk>";
 
 enum cmdtypes {
@@ -48,7 +48,7 @@ enum cmdtypes {
     CMDARG_NULL_DEBUG
 };
 
-static char doc_global[] = "\n*** OX Controller v1.2***\n"
+static char doc_global[] = "\n*** OX Controller v1.3 ***\n"
         " \n An OpenChannel SSD Controller\n\n"
         " Available commands:\n"
         "  start            Start controller with standard configuration\n"

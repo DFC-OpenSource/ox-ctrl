@@ -747,6 +747,8 @@ uint8_t nand_dm_init() {
 }
 
 uint8_t nand_dm_deinit() {
+    pthread_cancel(io_completion);
+    pthread_join(io_completion, NULL);
     virt_unmap();
     munmap(desc_tbl_addr, size[0] * getpagesize());
     munmap(ctrl_reg_addr, size[1] * getpagesize());
