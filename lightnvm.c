@@ -242,14 +242,14 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     uint32_t nlb = dm->nlb + 1;
     struct nvm_ppa_addr *psl = req->nvm_io.ppalist;
 
-    if (spba == LNVM_PBA_UNMAPPED || !spba)
-        return NVME_INVALID_FIELD | NVME_DNR;
-
     if (nlb > LNVM_PLANES) {
         log_info( "[ERROR lnvm: Wrong erase n of blocks (%d). "
                 "Max: %d supported]\n", nlb, LNVM_PLANES);
         return NVME_INVALID_FIELD | NVME_DNR;
     } else if (nlb > 1) {
+        if (spba == LNVM_PBA_UNMAPPED || !spba)
+            return NVME_INVALID_FIELD | NVME_DNR;
+
         nvme_read_from_host((void *)psl, spba, nlb * sizeof(uint64_t));
     } else {
         psl[0].ppa = spba;
