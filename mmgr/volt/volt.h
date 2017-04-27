@@ -19,7 +19,8 @@
 #define VOLT_SECTOR_SIZE     0x1000
 #define VOLT_OOB_SIZE        0x400
 
-#define VOLT_DMA_SLOT_INDEX  512
+#define VOLT_DMA_SLOT_CH     64
+#define VOLT_DMA_SLOT_INDEX  VOLT_DMA_SLOT_CH * VOLT_CHIP_COUNT
 #define VOLT_DMA_READ        0x1
 #define VOLT_DMA_WRITE       0x2
 
@@ -71,7 +72,7 @@ typedef struct VoltCtrl {
 
 struct volt_dma {
     uint8_t         *virt_addr;
-    uint64_t        prp_index;
+    uint32_t        prp_index;
     uint8_t         status; /* nand status */
 };
 

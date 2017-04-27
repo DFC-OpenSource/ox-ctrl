@@ -8,10 +8,9 @@
 #include "../../include/ox-mq.h"
 #include "../../include/uatomic.h"
 
-static atomic_t         nextprp;
-static pthread_mutex_t  prp_mutex;
-static pthread_mutex_t  prpmap_mutex;
-static uint64_t         prp_map[8];
+static atomic_t       nextprp[VOLT_CHIP_COUNT];
+static pthread_mutex_t  prpmap_mutex[VOLT_CHIP_COUNT];
+static uint32_t         prp_map[VOLT_CHIP_COUNT];
 
 static VoltCtrl             *volt;
 static struct nvm_mmgr      volt_mmgr;
@@ -20,47 +19,47 @@ extern struct core_struct   core;
 
 static int volt_start_prp_map(void)
 {
-    nextprp.counter = ATOMIC_INIT_RUNTIME(0);
-    pthread_mutex_init (&prp_mutex, NULL);
-    pthread_mutex_init (&prpmap_mutex, NULL);
-    memset (prp_map, 0x0, sizeof(uint64_t) * 8);
+    int i;
+
+    for (i = 0; i < VOLT_CHIP_COUNT; i++) {
+        nextprp[i].counter = ATOMIC_INIT_RUNTIME(0);
+        pthread_mutex_init (&prpmap_mutex[i], NULL);
+        memset(&prp_map[i], 0x0, sizeof (uint32_t));
+    }
 
     return 0;
 }
 
-static void volt_set_prp_map(uint64_t index, uint8_t flag)
+static void volt_set_prp_map(uint32_t index, uint32_t ch, uint8_t flag)
 {
-    pthread_mutex_lock(&prpmap_mutex);
-    prp_map[(index - 1) / 64] = (flag)
-            ? prp_map[(index - 1) / 64] | (1 << ((index - 1) % 64))
-            : prp_map[(index - 1) / 64] ^ (1 << ((index - 1) % 64));
-    pthread_mutex_unlock(&prpmap_mutex);
+    pthread_mutex_lock(&prpmap_mutex[ch]);
+    prp_map[ch] = (flag)
+            ? prp_map[ch] | (1 << (index - 1))
+            : prp_map[ch] ^ (1 << (index - 1));
+    pthread_mutex_unlock(&prpmap_mutex[ch]);
 }
 
-static uint8_t volt_get_next_prp(struct volt_dma *dma){
-    uint64_t next = 0;
+static uint32_t volt_get_next_prp(struct volt_dma *dma, uint32_t ch){
+    uint32_t next = 0;
 
     do {
-        pthread_mutex_lock(&prp_mutex);
-        next = atomic_read(&nextprp);
+        pthread_mutex_lock(&prpmap_mutex[ch]);
 
-        if (next == VOLT_DMA_SLOT_INDEX)
+        next = atomic_read(&nextprp[ch]);
+        if (next == VOLT_DMA_SLOT_CH)
             next = 1;
         else
             next++;
+        atomic_set(&nextprp[ch], next);
 
-        atomic_set(&nextprp, next);
-        pthread_mutex_unlock (&prp_mutex);
-
-        pthread_mutex_lock(&prpmap_mutex);
-        if (prp_map[(next - 1) / 64] & (1 << ((next - 1) % 64))) {
-            pthread_mutex_unlock(&prpmap_mutex);
+        if (prp_map[ch] & (1 << (next - 1))) {
+            pthread_mutex_unlock(&prpmap_mutex[ch]);
             usleep(1);
             continue;
         }
-        pthread_mutex_unlock(&prpmap_mutex);
+        pthread_mutex_unlock(&prpmap_mutex[ch]);
 
-        volt_set_prp_map(next, 0x1);
+        volt_set_prp_map(next, ch, 0x1);
 
         dma->prp_index = next;
 
@@ -349,7 +348,7 @@ static void volt_callback (void *opaque)
 
 OUT:
     if (nvm_cmd->cmdtype == MMGR_WRITE_PG || nvm_cmd->cmdtype == MMGR_READ_PG)
-        volt_set_prp_map(dma->prp_index, 0x0);
+        volt_set_prp_map(dma->prp_index, nvm_cmd->ppa.g.ch, 0x0);
 
     nvm_callback(nvm_cmd);
 }
@@ -475,9 +474,9 @@ static int volt_prepare_rw (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     memset(dma, 0, sizeof(struct volt_dma));
 
-    uint64_t prp_map = volt_get_next_prp(dma);
+    uint64_t prp_map = volt_get_next_prp(dma, cmd_nvm->ppa.g.ch);
 
-    dma->virt_addr = dma_buf[prp_map];
+    dma->virt_addr = dma_buf[(cmd_nvm->ppa.g.ch * VOLT_DMA_SLOT_CH) + prp_map];
 
     if (cmd_nvm->cmdtype == MMGR_READ_PG)
         memset(dma->virt_addr, 0, pg_sz + sec_sz);
@@ -506,7 +505,7 @@ static int volt_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
 CLEAN:
     log_err("[MMGR Read ERROR: NVM  returned -1]\n");
-    volt_set_prp_map(dma->prp_index, 0x0);
+    volt_set_prp_map(dma->prp_index, cmd_nvm->ppa.g.ch, 0x0);
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
 }
@@ -525,7 +524,7 @@ static int volt_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
 CLEAN:
     log_err("[MMGR Write ERROR: DMA or NVM returned -1]\n");
-    volt_set_prp_map(dma->prp_index, 0x0);
+    volt_set_prp_map(dma->prp_index, cmd_nvm->ppa.g.ch, 0x0);
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
 }
@@ -549,9 +548,8 @@ static void volt_exit (struct nvm_mmgr *mmgr)
     volt_clean_mem();
     volt->status.active = 0;
     ox_mq_destroy(volt->mq);
-    pthread_mutex_destroy(&prp_mutex);
-    pthread_mutex_destroy(&prpmap_mutex);
     for (i = 0; i < mmgr->geometry->n_of_ch; i++) {
+        pthread_mutex_destroy(&prpmap_mutex[i]);
         free(mmgr->ch_info[i].mmgr_rsv_list);
         free(mmgr->ch_info[i].ftl_rsv_list);
     }
@@ -633,7 +631,7 @@ static void volt_req_timeout (void **opaque, int counter)
          * dma->virt_addr is redirected to the emergency pointer */
         if (cmd->cmdtype == MMGR_WRITE_PG || cmd->cmdtype == MMGR_READ_PG) {
             dma->virt_addr = volt->edma;
-            volt_set_prp_map(dma->prp_index, 0x0);
+            volt_set_prp_map(dma->prp_index, cmd->ppa.g.ch, 0x0);
         }
     }
 }
