@@ -220,13 +220,16 @@ int nand_set_feature(uint16_t feat_addr, uint16_t length, void *feature_data) {
     return SUCCESS;
 }
 
+/* N */static uint32_t desc_idx = 0;
+
 uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
                                                                 void *req_ptr) {
     uint8_t i, tbl = 0;
-    static uint32_t desc_idx = 0;
+/* R */    //static uint32_t desc_idx = 0;
     nand_descriptor desc;
     uint16_t head_idx = DmaCtrl[tid].head_idx;
 
+LOCK:
     /* N */ pthread_mutex_lock(&m_desc_mutex);
 
     if (first_dma == 0) {
@@ -239,7 +242,9 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
         if (Desc_trck[desc_idx].is_used == TRACK_IDX_FREE) {
             break;
         }
-        usleep(1);
+/* R */ //usleep(1);
+/* N */ pthread_mutex_unlock(&m_desc_mutex);
+/* N */ goto LOCK;
     } while (1);
 
     do {
@@ -248,7 +253,9 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
             break;
         }
         mutex_unlock(&DmaCtrl[tid].DescSt[head_idx].available);
-        usleep(1);
+/* R */ //usleep(1);
+/* N */ pthread_mutex_unlock(&m_desc_mutex);
+/* N */ goto LOCK;
     } while (1);
 
     if (cmd_struct) {
