@@ -673,9 +673,11 @@ static void ox_mq_free_ext_list (struct ox_mq *mq)
 void ox_mq_destroy (struct ox_mq *mq)
 {
     ox_mq_free_queues(mq, mq->config->n_queues);
-    pthread_cancel(mq->to_tid);
-    pthread_join (mq->to_tid, NULL);
-    ox_mq_free_ext_list (mq);
+    if (mq->config->to_usec) {
+        pthread_cancel(mq->to_tid);
+        pthread_join (mq->to_tid, NULL);
+        ox_mq_free_ext_list (mq);
+    }
     free (mq->queues);
     free (mq->config);
     free (mq);
