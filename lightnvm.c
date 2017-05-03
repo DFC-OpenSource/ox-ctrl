@@ -337,12 +337,6 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     uint16_t is_write = (lrw->opcode == LNVM_CMD_PHYS_WRITE ||
                                           lrw->opcode == LNVM_CMD_HYBRID_WRITE);
 
-    if (spba == LNVM_PBA_UNMAPPED || !spba) {
-        nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
-                offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
-        return NVME_INVALID_FIELD | NVME_DNR;
-    }
-
     if (n_sectors > ln->params.max_sec_per_rq || n_sectors > 64) {
 
         log_info( "[ERROR lnvm: npages too large (%u). "
@@ -352,6 +346,13 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
         return NVME_INVALID_FIELD | NVME_DNR;
 
     } else if (n_sectors > 1) {
+
+        if (spba == LNVM_PBA_UNMAPPED || !spba) {
+            nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
+                    offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
+            return NVME_INVALID_FIELD | NVME_DNR;
+        }
+
         nvme_read_from_host((void *)psl, spba, n_sectors * sizeof(uint64_t));
     } else {
         psl[0].ppa = spba;
