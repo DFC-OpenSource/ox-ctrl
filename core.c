@@ -209,7 +209,7 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
     mq_config.sq_fn = nvm_ftl_process_sq;
     mq_config.cq_fn = nvm_ftl_process_cq;
     mq_config.to_fn = nvm_ftl_process_to;
-    mq_config.to_usec = NVM_FTL_QUEUE_TO;
+    mq_config.to_usec = 0;
     mq_config.flags = OX_MQ_TO_COMPLETE;
     ftl->mq = ox_mq_init(&mq_config);
     if (!ftl->mq)

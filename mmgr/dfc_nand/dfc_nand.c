@@ -200,7 +200,7 @@ static int dfcnand_start_mq (void)
     mq_config.sq_fn = dfcnand_process_sq;
     mq_config.cq_fn = dfcnand_process_cq;
     mq_config.to_fn = dfcnand_process_to;
-    mq_config.to_usec = 250000;
+    mq_config.to_usec = 0;
     mq_config.flags = 0;
     nand_mq = ox_mq_init(&mq_config);
     if (!nand_mq)
