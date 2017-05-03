@@ -3,6 +3,7 @@
 OX is a controller solution for programmable devices like the DFC (https://github.com/DFC-OpenSource/). OX exposes the
 device as a LightNVM compatible Open-Channel SSD. OX has been developed for potentially support different FTL responsabilities (e.g. write buffering, ECC) or a full-fledged FTL. FTLs are registered within the OX core, enabling applications to select channels to be managed by a specific FTL. The LightNVM FTL, already in OX, parses LightNVM (http://lightnvm.io/) commands and lets the DFC being managed by the host. e.g. The Linux kernel and user-space applications are able to see, manage and isolate the SSD geometry (channels, LUNs, blocks and pages).
 
+
 OX is developed under a project at the IT-University of Copenhagen and welcomes all the DFC Community for potential contributions.
 
 Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctrl/wiki), latest releases here (https://github.com/DFC-OpenSource/ox-ctrl/releases) and code under development here (https://github.com/DFC-OpenSource/ox-ctrl/tree/for-next).
@@ -67,6 +68,7 @@ GRUB_CMDLINE_LINUX_DEFAULT="quiet splash blacklist=nvme mem=8G"
 
 # FOX testing setup:
 ```
+
 - Install the right kernel with user IO support (soon uptream in kernel 4.12), for now use:
   - https://github.com/OpenChannelSSD/linux/tree/for-4.12/core
   
