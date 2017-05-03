@@ -373,13 +373,14 @@ int ox_mq_submit_req (struct ox_mq *mq, uint32_t qid, void *opaque)
     TAILQ_INSERT_TAIL (&q->sq_used, req, entry);
     atomic_inc(&q->stats.sq_used);
 
+    pthread_mutex_unlock (&q->sq_used_mutex);
+
     /* Wake consumer thread if queue was empty */
     if (wake) {
         pthread_mutex_lock (&q->sq_cond_m);
         pthread_cond_signal(&q->sq_cond);
         pthread_mutex_unlock (&q->sq_cond_m);
     }
-    pthread_mutex_unlock (&q->sq_used_mutex);
 
     return 0;
 }
@@ -399,10 +400,10 @@ int ox_mq_complete_req (struct ox_mq *mq, struct ox_mq_entry *req_sq)
 
     /* Check if request is a TIMEOUT_COMPLETED but not TIMEOUT_BACK */
     if (req_sq->status == OX_MQ_TIMEOUT_COMPLETED) {
+        req_sq->status = OX_MQ_TIMEOUT_BACK;
         ox_mq_free_entry(mq, req_sq);
         atomic_inc(&mq->stats.to_back);
         pthread_mutex_unlock (&req_sq->entry_mutex);
-        req_sq->status = OX_MQ_TIMEOUT_BACK;
         return -1;
     }
 
@@ -422,7 +423,6 @@ int ox_mq_complete_req (struct ox_mq *mq, struct ox_mq_entry *req_sq)
     pthread_mutex_unlock (&q->cq_free_mutex);
     atomic_dec(&q->stats.cq_free);
 
-    pthread_mutex_lock (&req_sq->entry_mutex);
     req_cq->opaque = req_sq->opaque;
     req_cq->qid = req_sq->qid;
 
@@ -432,7 +432,6 @@ int ox_mq_complete_req (struct ox_mq *mq, struct ox_mq_entry *req_sq)
         ox_mq_reset_entry (req_sq);
         OX_MQ_ENQUEUE (&q->sq_free,req_sq,&q->sq_free_mutex,&q->stats.sq_free);
     }
-    pthread_mutex_unlock (&req_sq->entry_mutex); /**/
 
     pthread_mutex_lock (&q->cq_used_mutex);
     if (TAILQ_EMPTY (&q->cq_used))
@@ -442,13 +441,14 @@ int ox_mq_complete_req (struct ox_mq *mq, struct ox_mq_entry *req_sq)
     TAILQ_INSERT_TAIL (&q->cq_used, req_cq, entry);
     atomic_inc(&q->stats.cq_used);
 
+    pthread_mutex_unlock (&q->cq_used_mutex);
+
     /* Wake consumer thread if queue was empty */
     if (wake) {
         pthread_mutex_lock (&q->cq_cond_m);
         pthread_cond_signal(&q->cq_cond);
         pthread_mutex_unlock (&q->cq_cond_m);
     }
-    pthread_mutex_unlock (&q->cq_used_mutex);
 
     return 0;
 }
