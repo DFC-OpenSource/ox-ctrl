@@ -242,14 +242,14 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     uint32_t nlb = dm->nlb + 1;
     struct nvm_ppa_addr *psl = req->nvm_io.ppalist;
 
-    if (spba == LNVM_PBA_UNMAPPED || !spba)
-        return NVME_INVALID_FIELD | NVME_DNR;
-
     if (nlb > LNVM_PLANES) {
         log_info( "[ERROR lnvm: Wrong erase n of blocks (%d). "
                 "Max: %d supported]\n", nlb, LNVM_PLANES);
         return NVME_INVALID_FIELD | NVME_DNR;
     } else if (nlb > 1) {
+        if (spba == LNVM_PBA_UNMAPPED || !spba)
+            return NVME_INVALID_FIELD | NVME_DNR;
+
         nvme_read_from_host((void *)psl, spba, nlb * sizeof(uint64_t));
     } else {
         psl[0].ppa = spba;
@@ -337,12 +337,6 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     uint16_t is_write = (lrw->opcode == LNVM_CMD_PHYS_WRITE ||
                                           lrw->opcode == LNVM_CMD_HYBRID_WRITE);
 
-    if (spba == LNVM_PBA_UNMAPPED || !spba) {
-        nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
-                offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
-        return NVME_INVALID_FIELD | NVME_DNR;
-    }
-
     if (n_sectors > ln->params.max_sec_per_rq || n_sectors > 64) {
 
         log_info( "[ERROR lnvm: npages too large (%u). "
@@ -352,6 +346,13 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
         return NVME_INVALID_FIELD | NVME_DNR;
 
     } else if (n_sectors > 1) {
+
+        if (spba == LNVM_PBA_UNMAPPED || !spba) {
+            nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
+                    offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
+            return NVME_INVALID_FIELD | NVME_DNR;
+        }
+
         nvme_read_from_host((void *)psl, spba, n_sectors * sizeof(uint64_t));
     } else {
         psl[0].ppa = spba;
@@ -542,7 +543,6 @@ int lnvm_init(NvmeCtrl *n)
     log_info("    [lnvm: Pages per Block: %d]\n",c->num_pg);
     log_info("    [lnvm: Planes: %d]\n",c->num_pln);
     log_info("    [lnvm: Total Blocks: %lu]\n", tot_blks);
-    log_info("    [lnvm: Reserved/Bad Blocks: %lu]\n", rsv_blks);
     log_info("    [lnvm: Total Pages: %lu]\n",c->num_pg * tot_blks
                                                                 * c->num_pln);
     log_info("    [lnvm: Page size: %d bytes]\n",c->fpg_sz);

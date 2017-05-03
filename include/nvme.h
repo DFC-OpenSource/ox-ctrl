@@ -1021,8 +1021,8 @@ typedef struct NvmeCtrl {
     uint8_t         running;
     uint8_t         aer_mask;
     TAILQ_HEAD (ctrl_aerhead, NvmeAsyncEvent)   aer_queue;
-    pthread_spinlock_t                          qs_req_spin;
-    pthread_spinlock_t                          aer_req_spin;
+    pthread_mutex_t                             qs_req_mutex;
+    pthread_mutex_t                             aer_req_mutex;
     pthread_mutex_t                             req_mutex;
     LIST_HEAD(ext_list, NvmeRequest)            ext_list;/*req allocated later*/
 

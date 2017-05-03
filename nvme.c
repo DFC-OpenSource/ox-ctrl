@@ -84,7 +84,7 @@ static void nvme_set_default (NvmeCtrl *n)
 #endif /* LIGHTNVM */
 }
 
-inline void nvme_regs_setup (NvmeCtrl *n)
+void nvme_regs_setup (NvmeCtrl *n)
 {
     memcpy (&n->nvme_regs, (uint64_t *)(nvm_pcie->nvme_regs), sizeof(NvmeRegs));
 
@@ -201,8 +201,6 @@ static int nvme_init_ctrl (NvmeCtrl *n)
     if (!n->elpes || !n->aer_reqs)
         return EMEM;
 
-    LIST_INIT (&n->ext_list);
-
     memset(&n->stat, 0, sizeof(NvmeStats));
 
     return 0;
@@ -257,8 +255,10 @@ static int nvme_init_namespaces (NvmeCtrl *n)
 	id_ns->nuse = id_ns->ncap = id_ns->nsze = htole64(blks);
 
 #if LIGHTNVM
-        if (lnvm_dev(n))
+        if (lnvm_dev(n)) {
             id_ns->vs[0] = 0x1;
+            id_ns->nsze = 0;
+        }
 #endif /* LIGHTNVM */
 
         ns->id = i + 1;
@@ -318,7 +318,7 @@ uint16_t nvme_init_cq (NvmeCQ *cq, NvmeCtrl *n, uint64_t dma_addr,
                     uint16_t cqid, uint16_t vector, uint16_t size,
                     uint16_t irq_enabled, int contig)
 {
-    uint64_t cq_base = NULL;
+    uint64_t cq_base = 0;
     int fd_qmem = 0;
 
     if (dma_addr) {
@@ -452,7 +452,7 @@ static int nvme_start_ctrl (NvmeCtrl *n)
     uint32_t page_bits = NVME_CC_MPS(n->nvme_regs.vBar.cc) + 12;
     uint32_t page_size = 1 << page_bits;
 
-    syslog(LOG_DEBUG,"[nvme: nvme starting ctrl]\n");
+    syslog(LOG_INFO,"[nvme: nvme starting ctrl]\n");
 
     if (n->cq[0] || n->sq[0] || !n->nvme_regs.vBar.asq ||
                         !n->nvme_regs.vBar.acq ||
@@ -502,13 +502,12 @@ void nvme_free_sq (NvmeSQ *sq, NvmeCtrl *n)
     FREE_VALID (sq->io_req);
     FREE_VALID (sq->prp_list);
 
-    if (sq->dma_addr) {
+    if (sq->dma_addr)
         sq->dma_addr = 0;
-    }
+
     SAFE_CLOSE (sq->fd_qmem);
-    if (sq->sqid) {
+    if (sq->sqid)
 	FREE_VALID (sq);
-    }
 }
 
 inline void nvme_free_cq (NvmeCQ *cq, NvmeCtrl *n)
@@ -529,45 +528,25 @@ inline void nvme_free_cq (NvmeCQ *cq, NvmeCtrl *n)
 static void nvme_clear_ctrl (NvmeCtrl *n)
 {
     NvmeAsyncEvent *event;
-    NvmeRequest *req;
     int i;
 
-    if (!n->running) {
-    	/*nvme not in action.. so nothing to stop*/
-	return;
-    }
-    n->running = 0;
-    if (n->sq) {
-        for (i = 0; i < n->num_queues; i++) {
-            if (n->sq[i] != NULL) {
+    if (n->sq)
+        for (i = 0; i < n->num_queues; i++)
+            if (n->sq[i] != NULL)
 		nvme_free_sq (n->sq[i], n);
-            }
-	}
-    }
 
-    if (n->cq) {
-        for (i = 0; i < n->num_queues; i++) {
-            if (n->cq[i] != NULL) {
+    if (n->cq)
+        for (i = 0; i < n->num_queues; i++)
+            if (n->cq[i] != NULL)
 		nvme_free_cq (n->cq[i], n);
-            }
-	}
-    }
 
-    /* Free requests allocated later */
-    while (!LIST_EMPTY(&n->ext_list)) {
-        req = LIST_FIRST (&n->ext_list);
-        if (req) {
-            LIST_REMOVE (req, ext_req);
-            free (req);
-        }
-    }
-
-    pthread_spin_lock(&n->aer_req_spin);
+    pthread_mutex_lock(&n->aer_req_mutex);
     while((event = (NvmeAsyncEvent *)TAILQ_FIRST(&n->aer_queue)) != NULL) {
         TAILQ_REMOVE(&n->aer_queue, event, entry);
         FREE_VALID(event);
     }
-    pthread_spin_unlock(&n->aer_req_spin);
+    pthread_mutex_unlock(&n->aer_req_mutex);
+
     n->nvme_regs.vBar.cc = 0;
     n->nvme_regs.vBar.csts = 0;
     n->features.temp_thresh = 0x14d;
@@ -608,7 +587,7 @@ void nvme_process_reg (NvmeCtrl *n, uint64_t offset, uint64_t data)
             if (NVME_CC_SHN(data) && !(NVME_CC_SHN(n->nvme_regs.vBar.cc))) {
 		syslog(LOG_DEBUG,"[nvme: Nvme SHN!]\n");
 		n->nvme_regs.vBar.cc = data;
-		nvme_clear_ctrl(n);
+                n->running = 1;
 		n->nvme_regs.vBar.csts |= NVME_CSTS_SHST_COMPLETE;
 		n->nvme_regs.vBar.csts &= ~NVME_CSTS_READY;
 		n->nvme_regs.vBar.cc = 0;
@@ -751,7 +730,7 @@ static void nvme_update_shadowregs(NvmeQSched *qs)
             }
         }
     }
-    pthread_spin_lock(&n->qs_req_spin);
+    pthread_mutex_lock(&n->qs_req_mutex);
     for(i = 0; i < NVME_MAX_PRIORITY; i++) {
     	if(qs->prio_avail[i]) {
             qs->shadow_regs[i][0] |= (((((uint64_t)status_regs[1]) << 32) +
@@ -760,7 +739,7 @@ static void nvme_update_shadowregs(NvmeQSched *qs)
                                         status_regs[2]) & qs->mask_regs[i][1]);
 	}
     }
-    pthread_spin_unlock(&n->qs_req_spin);
+    pthread_mutex_unlock(&n->qs_req_mutex);
 }
 
 static int nvme_get_best_sqid(NvmeQSched *qs)
@@ -815,7 +794,6 @@ static void nvme_post_cqe (NvmeCQ *cq, NvmeRequest *req)
     NvmeCtrl *n = cq->ctrl;
     NvmeSQ *sq = req->sq;
     NvmeCqe *cqe = &req->cqe;
-    NvmeRequest *new_req;
     uint8_t phase = cq->phase;
     uint64_t addr;
 
@@ -844,15 +822,8 @@ static void nvme_post_cqe (NvmeCQ *cq, NvmeRequest *req)
     nvme_addr_write (n, addr, (void *)cqe, sizeof (*cqe));
     nvme_inc_cq_tail (cq);
 
-    /* Failed requests are not used in the queue
-     * In case of timeout request, we have to avoid reusing the same structure
-     * TODO: Free these structures when the timeout request hits completion */
-    if (req->status != NVME_SUCCESS) {
-        new_req = malloc (sizeof (NvmeRequest));
-        memcpy (new_req, req, sizeof (NvmeRequest));
-        new_req->ext = 1;
-        req = new_req;
-    }
+    /* In case of timeout request, we have to avoid reusing the same structure
+     * TODO: Replace structures in case of timeout */
 
     TAILQ_INSERT_TAIL (&sq->req_list, req, entry);
     if (cq->hold_sqs) cq->hold_sqs = 0;
@@ -878,12 +849,14 @@ void nvme_enqueue_req_completion (NvmeCQ *cq, NvmeRequest *req)
 	pthread_mutex_unlock(&n->req_mutex);
 	return;
     }
+
+    notify = coalesce_disabled || !req->sq->sqid || !time_ns ||
+	req->status != NVME_SUCCESS || nvme_cqes_pending(cq) >= thresh;
+
     pthread_mutex_lock(&n->req_mutex);
     nvme_post_cqe (cq, req);
     pthread_mutex_unlock(&n->req_mutex);
 
-    notify = coalesce_disabled || !req->sq->sqid || !time_ns ||
-	req->status != NVME_SUCCESS || nvme_cqes_pending(cq) >= thresh;
     if (notify)
 	nvm_pcie->ops->isr_notify(cq);
 }
@@ -899,9 +872,9 @@ void nvme_enqueue_event (NvmeCtrl *n, uint8_t event_type,
     event->result.event_info = event_info;
     event->result.log_page   = log_page;
 
-    pthread_spin_lock(&n->aer_req_spin);
+    pthread_mutex_lock(&n->aer_req_mutex);
     TAILQ_INSERT_TAIL (&n->aer_queue, event, entry);
-    pthread_spin_unlock(&n->aer_req_spin);
+    pthread_mutex_unlock(&n->aer_req_mutex);
 }
 
 void nvme_post_cqes (void *opaque)
@@ -922,7 +895,7 @@ void nvme_post_cqes (void *opaque)
     nvm_pcie->ops->isr_notify(cq);
 }
 
-inline void nvme_set_error_page (NvmeCtrl *n, uint16_t sqid, uint16_t cid,
+void nvme_set_error_page (NvmeCtrl *n, uint16_t sqid, uint16_t cid,
 		uint16_t status, uint16_t location, uint64_t lba, uint32_t nsid)
 {
     /* TODO: Not completely implemented */
@@ -1178,7 +1151,7 @@ JUMP:
         nvme_update_sq_tail (sq);
 	if (nvme_sq_empty(sq)) {
             reg_sqid = sq->sqid - 1;
-            pthread_spin_lock(&n->qs_req_spin);
+            pthread_mutex_lock(&n->qs_req_mutex);
             if(n->qsched.WRR) {
 		n->qsched.shadow_regs[sq->prio][reg_sqid >> 6] &=
                                                            (~(1UL << reg_sqid));
@@ -1186,7 +1159,7 @@ JUMP:
 		n->qsched.round_robin_status_regs[reg_sqid >> 5] &=
                                                            (~(1UL << reg_sqid));
             }
-            pthread_spin_unlock(&n->qs_req_spin);
+            pthread_mutex_unlock(&n->qs_req_mutex);
 	}
     }
     sq->completed += processed;
@@ -1274,9 +1247,9 @@ static void round_robin (NvmeCtrl *n)
     n_regs = ((qs->n_active_iosqs - 1) >> 5) + 1;
     for(i = 0; i < n_regs; i++) {
     	status_reg = *(qs->iodbst_reg + i);
-    	pthread_spin_lock(&n->qs_req_spin);
+    	pthread_mutex_lock(&n->qs_req_mutex);
     	qs->round_robin_status_regs[i] |= status_reg;
-    	pthread_spin_unlock(&n->qs_req_spin);
+    	pthread_mutex_unlock(&n->qs_req_mutex);
 
     	base = i << 5;
 	limit = (qs->n_active_iosqs < (base + 32)) ?
@@ -1314,7 +1287,7 @@ static inline int nvme_init_q_scheduler (NvmeCtrl *n)
     NvmeQSched *qs = &n->qsched;
     int i;
 
-    if(pthread_spin_init(&n->qs_req_spin,0)) {
+    if(pthread_mutex_init(&n->qs_req_mutex, 0)) {
 	log_err("[ERROR nvme: qs spin not initialized.]\n");
         return -1;
     }
@@ -1346,8 +1319,10 @@ void nvme_exit()
 #endif /* LIGHTNVM */
 
     pthread_mutex_destroy(&n->req_mutex);
-    pthread_spin_destroy(&n->qs_req_spin);
-    pthread_spin_destroy(&n->aer_req_spin);
+    pthread_mutex_destroy(&n->qs_req_mutex);
+    pthread_mutex_destroy(&n->aer_req_mutex);
+
+    log_info(" [nvm: NVME standard unregistered.]\n");
 }
 
 int nvme_init(NvmeCtrl *n)
@@ -1377,7 +1352,6 @@ int nvme_init(NvmeCtrl *n)
         return ENVME_REGISTER;
     syslog (LOG_INFO,"  [nvm: LightNVM is registered]\n");
 #endif /* LIGHTNVM */
-    n->running = 1;
     log_info("  [nvm: NVME standard registered]\n");
     return 0;
 }

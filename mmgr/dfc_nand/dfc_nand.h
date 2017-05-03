@@ -2,6 +2,7 @@
 #define DFC_NAND_H
 
 #include <stdint.h>
+#include "../../include/uatomic.h"
 
 #define NAND_PAGE_COUNT         512
 #define NAND_SECTOR_COUNT       4
@@ -15,6 +16,9 @@
 #define DFCNAND_RESV_BLK_COUNT  1
 
 #define DFCNAND_DMA_SLOT_INDEX  64
+
+#define DFCNAND_RDY_BSY_ON      (1 << 3)
+#define DFCNAND_RDY_BSY_OFF     0x0
 
 enum DFCNAND_COMMAND_ID {
     DFCNAND_PAGE_PROG           = 0xA,
@@ -42,6 +46,8 @@ struct dfcnand_io {
     int                      prp_index;
     uint8_t                  cmd_type;
     struct nvm_mmgr_io_cmd   *nvm_mmgr_io;
+    void                     *mq_req;
+    uint8_t                  rdy_bsy; /* if positive, waits for ready signal */
 };
 
 #endif /* DFC_NAND_H */

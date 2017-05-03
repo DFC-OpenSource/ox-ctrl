@@ -1,110 +1,112 @@
-# OX: An Open-Source Open-Channel SSD Controller
+# OX: A DFC-based Open-Channel SSD Controller
 
-OX is a controller solution for programmable devices like the Dragon Fire Card. OX implements 
-the NVMe specification and exposes the device as a LightNVM compatible Open-Channel SSD. 
-OX has been developed to work as a hybrid controller, potentially supporting different FTL 
-responsabilities (e.g. write buffering or ECC) or a full-fledged FTL. FTLs are registered 
-within the OX core, enabling applications to select Storage Channels to be managed by a specific FTL. 
-Within a device we may have several aStorage Channels managed by different FTLs.
+OX is a controller solution for programmable devices like the DFC (https://github.com/DFC-OpenSource/). OX exposes the
+device as a LightNVM compatible Open-Channel SSD. OX has been developed for potentially support different FTL responsabilities (e.g. write buffering, ECC) or a full-fledged FTL. FTLs are registered within the OX core, enabling applications to select channels to be managed by a specific FTL. The LightNVM FTL, already in OX, parses LightNVM (http://lightnvm.io/) commands and lets the DFC being managed by the host. e.g. The Linux kernel and user-space applications are able to see, manage and isolate the SSD geometry (channels, LUNs, blocks and pages).
 
-OX is design to support both NVMe over PCIe and NVMe over Fabrics. RDMA and Fabrics is a work-in-progres.
 
-OX can also be used to explore near-data processing. Shipping cross-compiled binary code from the host to be 
-executed by the card (e.g. DFC) is a work-in-progress. 
+OX is developed under a project at the IT-University of Copenhagen and welcomes all the DFC Community for potential contributions.
 
-The repositories cited here are the latest setup tested succesfully with OX. Once direct I/O support to physical Open-Channel SSDs in the Linux kernel is a work-in-progress task, mix the setup with other sources may result in compatibility problems.
+Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctrl/wiki), latest releases here (https://github.com/DFC-OpenSource/ox-ctrl/releases) and code under development here (https://github.com/DFC-OpenSource/ox-ctrl/tree/for-next).
 
-For the latest commits, plase check branch 'for-next'.
+# OX 1.3 evaluation:  
+ Evaluated with FOX 1.0 (https://github.com/DFC-OpenSource/fox).
+```
+READ : ~385 MB/s
+WRITE: ~298 MB/s
 
-PLEASE, REFER TO THE WIKI FOR FULL DOCUMENTATION:
+The FPGA 03.00.01 provides a throughtput of 400 MB/s READ and 300 MB/s WRITE. There is
+a small overhead for reads. We intend to fix it for the next release.
 ```
-https://github.com/DFC-OpenSource/ox-ctrl/wiki
-```
-CHECK RELEASES:
-```
-https://github.com/DFC-OpenSource/ox-ctrl/releases
-```
-IF YOU DO NOT HAVE AN OPEN-CHANNEL SSD, YOU CAN USE QEMU WITH AN EMBEDDED OX CONTROLLER:
-```
-https://github.com/DFC-OpenSource/qemu-ox
-```
-STABLE KERNEL FOR USER PPA IO THROUGHT LIBLIGHTNVM:
-```
-https://github.com/ivpi/linux-liblnvm
-```
-KERNEL WITH A HOST-BASED FTL FOR OPEN-CHANNEL SSDS (PBLK):
-```
-https://github.com/OpenChannelSSD/linux/tree/pblk.19
-```
-OX-ENABLED NVME LINUX DRIVER:
-```
-https://github.com/ivpi/nvme-driver-DFC
-```
-USER-SPACE LIBRARY FOR OPEN-CHANNEL SSDs (LIBLIGHTNVM):
-```
-https://github.com/ivpi/liblightnvm
-```
-NVME CLIENT FOR OPEN-CHANNEL SSD MANAGEMENT (nvme-cli):
-```
-https://github.com/linux-nvme/nvme-cli
-```
-TOOL FOR TESTING OPEN-CHANNEL SSDs:
-```
-https://github.com/ivpi/fox
-```
+![OX Controller bandwidth](https://i.imgsafe.org/9dcabe74c2.png)
+
 Under ./bin you can find OX already compiled:
 ```
  - ox-ctrl is a essential-only binary for a production environment. 
  - ox-ctrl-test is a complete binary including all tests and administration mode. 
- - ox-ctrl-volt has Volt Storage Media Manager. An in-memory backend instead of NAND, for testing purposes.
+ - ox-ctrl-volt has Volt Storage Media Manager. An in-memory backend instead of NAND, 
+ for testing purposes.
+ 
+ IMPORTANT:
+ - rootfs_03.00.00_ox-1.x.sqsh is the rootfs containg ox-ctrl. If you do not use this 
+ rootfs, you have to disable  the 'issd-nvme' application that runs automatically by other rootfs.
  ```
-SETTING UP THE ENVIRONMENT FOR USER PPA IOs:
+OX is a user-space application developed in C and cross-compiled for the DFC arm cores. After the board startup, OX must be initialized with one of these commands:
 ```
-- Install the kernel for user ppa IO;
-  - https://github.com/ivpi/linux-liblnvm  
-- Blacklist the nvme driver (not necessary in QEMU. For the DFC, the driver must be loaded later);
-  - In /etc/default/grub -> modify line to: GRUB_CMDLINE_LINUX_DEFAULT="quiet splash modprobe.blacklist=nvme"
+$ ox-ctrl start (production)
+$ ox-ctrl debug (print everything that is going on)
+$ ox-ctrl 
+```
+
+# The host kernel
+
+LightNVM is the Linux kernel support for Open-Channel SSDs. It is included in the kernel since version 4.4. For a better OX experience, we recommend the kernel 4.12 provided by the Open-Channel SSD Community (https://github.com/OpenChannelSSD/linux/tree/for-4.12/core). This kernel enables liblightnvm (http://lightnvm.io/liblightnvm/), the user-space library for Open-Channel SSDs. 
+
+Installing this kernel, you will be able to run a wide set of workloads on the DFC using FOX (https://github.com/DFC-OpenSource/fox), a tool for testing Open-Channel SSDs.
+
+pblk (http://lightnvm.io/pblk-tools/) is a host-based full-fledged FTL. It exposes an open-channel SSD as a block device and will be available in the kernel 4.12. It means that a standard file system like EXT4 can be mounted on top of the DFC. We are working towards to improve the DFC performance with pblk.
+
+# I DO NOT HAVE A DFC: OX emulation with QEMU
+
+If you do not have an OX-enabled board like the DFC, you can emulate OX with QEMU. We have developed a version of QEMU containing OX with few modifications for the emulated environment. Please follow the instructions in (https://github.com/DFC-OpenSource/qemu-ox). This QEMU version uses VOLT, our volatile media manager with 4 GB of emulated NAND. So, all data will be lost if you turn QEMU off.
+
+# I HAVE A DFC WITHOUT FPGA OR NAND DIMM: OX Volt Media Manager
+
+If you have a DFC but does not have a storage FPGA card with NAND DIMMs, your option is using Volt, our volatile backend in the DFC DRAM. Just start OX with one of the follow commands:
+```
+$ ox-ctrl-volt start
+$ ox-ctrl-volt debug
+```
+
+# DFC NVMe Driver support
+
+We are working to make the DFC NVMe driver support upstream. For now you can find the driver available in (https://github.com/ivpi/nvme-driver-DFC). 
+
+Remember to blacklist the nvme driver during the system startup. You can do this modifying the follow line in the file "/etc/default/grub", this line also limits the host memory to 8GB (DFC limitation):
+```
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash blacklist=nvme mem=8G"
+```
+
+# FOX testing setup:
+```
+
+- Install the right kernel with user IO support (soon uptream in kernel 4.12), for now use:
+  - https://github.com/OpenChannelSSD/linux/tree/for-4.12/core
+  
+- Blacklist the nvme driver (not necessary in QEMU. For the DFC, we use an OX-enabled driver);
+
 - Install liblightnvm;
-  - https://github.com/ivpi/linux-liblnvm
-- Install nvme-cli;
-  - https://github.com/linux-nvme/nvme-cli
-- Make sure gennvm module is loaded, if not, load it;
-  $ sudo modprobe gennvm;
+  - http://lightnvm.io/liblightnvm/
+  
 - Start OX Controller in the DFC (in QEMU it will be already started). You have to install OX on the DFC before;
   In the DFC console:
   $ ox-ctrl start
+  
 - Build and load the NVMe driver (in QEMU it will be already loaded);
   - https://github.com/ivpi/nvme-driver-DFC
   $ sudo insmod <driver_folder>/nvme-core.ko
   $ sudo insmod <driver_folder>/nvme.ko
+  
 - Check the kernel log, you should see the device registration messages;
-  $ dmesg
-- Initialize the device with nvme-cli:
-  $ sudo nvme lnvm init -d nvme0n1  
-- Check the device with nvme-cli, you should see the device with 'gennvm' initialized in nvme0n1;
-  $ sudo nvme lnvm list
+  lnvm: Dragon Fire Card NVMe Driver support.
+  nvm: registered nvme0n1 [4/2/512/1024/32/8]
+  
 - Run the tests with the tool (https://github.com/ivpi/fox), or use liblightnvm as you wish.
 ```
-UBUNTU IMAGE WITH THE ENVIRONMENT AND TESTS READY TO RUN:
-```
-soon...
-```
 
-LIMITATIONS:
-```
-OX DOES NOT HAVE A FTL FOR STANDARD BLOCK DEVICES, BUT IT HAS THE CAPABILITIES FOR IT. FOR NOW OX WORKS AS OPEN-CHANNEL CONTROLLER.
-OX HAS BEEN DESIGNED TO SUPPORT SEVERAL FTL IMPLEMENTATIONS. YOU ARE WELCOME TO CONTRIBUTE.
-```
+# FTL support:
 
+OX has a library for supporting a full-fledged FTL, but some coding is still needed. pblk (http://lightnvm.io/pblk-tools/) is a full-fledged FTL upstream in the Linux kernel 4.12. We are working torwards for making pblk working well with the DFC and OX Controller. With pblk, it will be possible mounting a file system on top of OX and the DFC.
+
+# FPGA version and DFC config
+ 
 This controller supports the FPGA 3.01.00.
 
-The latest stable DFC firmware version:
-
+The latest stable DFC firmware version (with OX 1.3):
 ```
 ========================================
         Image           Version                
  ========================================
-    PBL                   03.00.00
+    PBL                   03.00.01
     DPC                   03.00.00
     MC                    03.00.00
     Kernel                05.00.00
@@ -119,7 +121,8 @@ The latest DFC hardware configuration:
 ```
 2 NAND DIMM modules installed in the slots M1 and M3 of the storage card.
 ```
-Features:
+
+# Features:
 
 ```
       - Media managers: NAND, DDR, etc.
@@ -144,14 +147,10 @@ Features:
         gathers data from the host and sends it to the command parser layer.
         
       NVMe queue support: Read/write NVMe registers mapped by the ICH, manage admin/
-        IO NVMe queue(s) and perform the DMA data transfer.
+        IO NVMe queue(s) and perform the DMA data transfer if FPGA does not provide it.
         
-      Command parsers: Parses commands coming from the ICH and call the right FTL
+      Command parsers: Parses commands from the ICH and call the right FTL
         instance to handle it.
-    
-        Since media managers expose NAND as channels, applications can make 
-    bindings between channels and FTLs. It means that inside a device we can 
-    have different channels managed by different FTLs.
 ```
 We have implemented a PCIe interconnection handler, a media manager to expose 8 channels, NVMe and LightNVM support for the DFC.
 
@@ -166,27 +165,27 @@ Under /bin you can find the binaries + the DFC rootfs with OX included.
 
 WE RECOMMEND THE USE OF ROOTFS. AFTER UPGRADE THE ROOTFS FIRMWARE, ONLY TYPE 'ox-ctrl', 'ox-ctrl-test' OR 'ox-ctrl-volt' TO USE OX.
 
-OX accepts parameters as follow:
+# OX command line
 
-#ox-ctrl start
+$ ox-ctrl start
 ```
 Use 'start' to run the controller with standard settings.
 ```
 
-#ox-ctrl debug
+$ ox-ctrl debug
 ```
 Use 'debug' to run the controller in debug mode (verbose).
 ```
-#ox-ctrl null
+$ ox-ctrl null
 ```
-Use 'null' to run the controller as a null device. No data transfer is performed, OX will complete all I/Os succesfully. 
-This mode is useful for testing the NVMe queues.
+Use 'null' to run the controller as a null device. No data transfer is performed, OX will complete all 
+I/Os succesfully. This mode is useful for testing the NVMe queues.
 ```
-#ox-ctrl null-debug
+$ ox-ctrl null-debug
 ```
 Use 'null-debug' to run the controller as a null device and show the debug information in the screen.
 ```
-#ox-ctrl --help
+$ ox-ctrl --help
 ```
 *** OX Controller ***
  
@@ -210,8 +209,9 @@ Use 'null-debug' to run the controller as a null device and show the debug infor
 Report bugs to Ivan L. Picoli <ivpi@itu.dk>
 
 ```
+The same commands apply for VOLT media menager (ox-ctrl-volt).
 
-#ox-ctrl-test test --help
+$ ox-ctrl-test test --help
 ```
 Use this command to run tests, it will start the controller, run the tests and
 close the controller.
@@ -244,7 +244,7 @@ Report bugs to Ivan L. Picoli <ivpi@itu.dk>.
 
 ```
 
-#ox-ctrl-test admin --help
+$ ox-ctrl-test admin --help
 ```
 Use this command to run specific tasks within the controller.
 
@@ -267,7 +267,7 @@ for any corresponding short options.
 Report bugs to Ivan L. Picoli <ivpi@itu.dk>.
 ```
 
-#ox-ctrl-test admin -l
+$ ox-ctrl-test admin -l
 ```
 OX Controller ADMIN
  
@@ -283,159 +283,13 @@ Available OX Admin Tasks:
      eg. ox-ctrl admin -t erase-ch (not implemented)
 ```
 
-#OX layer registration:
+# OX layer registration:
 
 ```
 Besides the DFC, OX is extensible to other devices through the layer registration interface. In order to
 use OX in other platforms, it is needed to develop the follow layers:
 
 - Interconnect handler: Here you map the NVMe registers according your platform, or make a Fabrics interconnection.
-- Media Manager: Here you abstract the channels of your non-volatile memory as channels, to be used by the other OX layers.
-- FTL: You can use the same FTL at any platform, but you can develop a new one and register it within the OX core.
-```
-
-#OX Media Manager (MMGR) registration interface:
-```
-typedef int     (nvm_mmgr_read_pg)(struct nvm_mmgr_io_cmd *);
-typedef int     (nvm_mmgr_write_pg)(struct nvm_mmgr_io_cmd *);
-typedef int     (nvm_mmgr_erase_blk)(struct nvm_mmgr_io_cmd *);
-typedef int     (nvm_mmgr_get_ch_info)(struct nvm_channel *, uint16_t);
-typedef int     (nvm_mmgr_set_ch_info)(struct nvm_channel *, uint16_t);
-typedef void    (nvm_mmgr_exit)(struct nvm_mmgr *);
-
-struct nvm_mmgr_ops {
-    nvm_mmgr_read_pg       *read_pg;
-    nvm_mmgr_write_pg      *write_pg;
-    nvm_mmgr_erase_blk     *erase_blk;
-    nvm_mmgr_exit          *exit;
-    nvm_mmgr_get_ch_info   *get_ch_info;
-    nvm_mmgr_set_ch_info   *set_ch_info;
-};
-
-struct nvm_mmgr_geometry {
-    uint8_t     n_of_ch;
-    uint8_t     lun_per_ch;
-    uint16_t    blk_per_lun;
-    uint16_t    pg_per_blk;
-    uint16_t    sec_per_pg;
-    uint8_t     n_of_planes;
-    uint32_t    pg_size;
-    uint32_t    sec_oob_sz;
-};
-
-struct nvm_channel {
-    uint16_t                    ch_id;
-    uint16_t                    ch_mmgr_id;
-    uint64_t                    ns_pgs;
-    uint64_t                    slba;
-    uint64_t                    elba;
-    uint64_t                    tot_bytes;
-    uint16_t                    mmgr_rsv; /* number of blks reserved by mmgr */
-    uint16_t                    ftl_rsv;  /* number of blks reserved by ftl */
-    struct nvm_mmgr             *mmgr;
-    struct nvm_ftl              *ftl;
-    struct nvm_mmgr_geometry    *geometry;
-    struct nvm_ppa_addr         *mmgr_rsv_list; /* list of mmgr reserved blks */
-    struct nvm_ppa_addr         *ftl_rsv_list;
-    LIST_ENTRY(nvm_channel)     entry;
-    union {
-        struct {
-            uint64_t   ns_id         :16;
-            uint64_t   ns_part       :32;
-            uint64_t   ftl_id        :8;
-            uint64_t   in_use        :8;
-        } i;
-        uint64_t       nvm_info;
-    };
-};
-
-struct nvm_mmgr {
-    char                        *name;
-    struct nvm_mmgr_ops         *ops;
-    struct nvm_mmgr_geometry    *geometry;
-    struct nvm_channel          *ch_info;
-    LIST_ENTRY(nvm_mmgr)        entry;
-};
-```
-
-#FTL registration interface:
-```
-typedef int       (nvm_ftl_submit_io)(struct nvm_io_cmd *);
-typedef void      (nvm_ftl_callback_io)(struct nvm_mmgr_io_cmd *);
-typedef int       (nvm_ftl_init_channel)(struct nvm_channel *);
-typedef void      (nvm_ftl_exit)(struct nvm_ftl *);
-typedef int       (nvm_ftl_get_bbtbl)(struct nvm_ppa_addr *,uint8_t *,uint32_t);
-typedef int       (nvm_ftl_set_bbtbl)(struct nvm_ppa_addr *, uint32_t);
-
-struct nvm_ftl_ops {
-    nvm_ftl_submit_io      *submit_io; /* FTL queue request consumer */
-    nvm_ftl_callback_io    *callback_io;
-    nvm_ftl_init_channel   *init_ch;
-    nvm_ftl_exit           *exit;
-    nvm_ftl_get_bbtbl      *get_bbtbl;
-    nvm_ftl_set_bbtbl      *set_bbtbl;
-};
-
-/* --- FTL CAPABILITIES BIT OFFSET --- */
-
-enum {
-    /* Get/Set Bad Block Table support */
-    FTL_CAP_GET_BBTBL     = 0x00,
-    FTL_CAP_SET_BBTBL     = 0x01,
-    /* Get/Set Logical to Physical Table support */
-    FTL_CAP_GET_L2PTBL    = 0x02,
-    FTL_CAP_SET_L2PTBL    = 0x03,
-};
-
-/* --- FTL BAD BLOCK TABLE FORMATS --- */
-
-enum {
-   /* Each block within a LUN is represented by a byte, the function must return
-   an array of n bytes, where n is the number of blocks per LUN. The function
-   must set single bad blocks or accept an array of blocks to set as bad. */
-    FTL_BBTBL_BYTE     = 0x00,
-};
-
-struct nvm_ftl {
-    uint16_t                ftl_id;
-    char                    *name;
-    struct nvm_ftl_ops      *ops;
-    uint32_t                cap; /* Capability bits */
-    uint16_t                bbtbl_format;
-    uint8_t                 nq; /* Number of queues/threads, up to 64 per FTL */
-    uint16_t                mq_id[64];
-    pthread_t               io_thread[64];
-    uint8_t                 last_q;
-    pthread_mutex_t         q_mutex;
-    uint8_t                 active;
-    LIST_ENTRY(nvm_ftl)     entry;
-};
-```
-
-#Interconnect handler registration interface:
-```
-typedef void        (nvm_pcie_isr_notify)(void *);
-typedef void        (nvm_pcie_exit)(void);
-typedef void        *(nvm_pcie_nvme_consumer) (void *);
-
-struct nvm_pcie_ops {
-    nvm_pcie_nvme_consumer  *nvme_consumer;
-    nvm_pcie_isr_notify     *isr_notify; /* notify host about completion */
-    nvm_pcie_exit           *exit;
-};
-
-struct nvm_pcie {
-    char                        *name;
-    void                        *ctrl;            /* pci specific structure */
-    union NvmeRegs              *nvme_regs;
-    struct nvm_pcie_ops          *ops;
-    struct nvm_memory_region    *host_io_mem;     /* host BAR */
-    pthread_t                   io_thread;        /* single thread for now */
-    uint32_t                    *io_dbstride_ptr; /* for queue scheduling */
-};
-```
-
-#OX Core Global Functions (used by all layers):
-```
-Refer to include/ssd.h (end of the file) for further details
+- Media Manager: Here is the channel abstraction for the non-volatile memory, to be used by the other OX layers.
+- FTL: The same FTL can be used in any platform, but you can develop a new one and register it within the OX core.
 ```

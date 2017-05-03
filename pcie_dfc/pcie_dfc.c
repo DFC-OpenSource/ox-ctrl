@@ -49,8 +49,6 @@
 
 extern struct core_struct core;
 
-static uint8_t nvmeKilled = 0;
-
 static inline void pcie_nvme_proc (uint32_t *fc_ptr, struct pci_ctrl *pci,
                                                                 NvmeCtrl *n) {
     int         j;
@@ -110,7 +108,8 @@ static inline int pcie_uio_read_int (ssize_t *nb, int fd, uint32_t *int_no) {
 
 void *dfcpcie_req_processor (void *arg)
 {
-    struct pci_ctrl *pci = (struct pci_ctrl *) arg;
+    struct nvm_pcie *pcie_dfc = (struct nvm_pcie *) arg;
+    struct pci_ctrl *pci = pcie_dfc->ctrl;
     struct timeval  def_time = {0, 100}, timeout = {0, 100};
     NvmeCtrl        *n = core.nvm_nvme_ctrl;
     uint32_t        *fifo_count_ptr = pci->fifo_count;
@@ -141,9 +140,10 @@ void *dfcpcie_req_processor (void *arg)
 
     FD_ZERO(&readfds);
 
-    log_info( "  [pci: NVMe thread alive.]\n");
-    while (!nvmeKilled) {
-        if (!n || !n->running)
+    log_info( "  [pcie: PCIe NVMe thread started.]\n");
+    while (!pcie_dfc->running) {
+        /* Start thread only if nvme is ready and tests are not running */
+        if (!n || n->running || (core.run_flag & RUN_TESTS))
             continue;
         FD_SET(uiofd, &readfds);
         FD_SET(uiofd1, &readfds);
@@ -181,7 +181,7 @@ void *dfcpcie_req_processor (void *arg)
 CLEAN_EXIT:
     close(uiofd);
     close(uiofd1);
-    log_info("  [pci: NVMe thread killed.]\n");
+    log_info(" [pcie: PCIe NVMe thread terminated.]\n");
     return;
 }
 
@@ -226,6 +226,7 @@ static int pcie_mmap_host_mem (struct pci_ctrl *pci)
     log_info("  [pci: host io_mem_addr : %p]\n", mem_addr);
 
     pci->io_mem.addr = (uint64_t)mem_addr;
+    pci->io_mem.paddr = HOST_OUTBOUND_ADDR;
     pci->io_mem.size = HOST_OUTBOUND_SIZE;
     pci->io_mem.is_valid = 1;
 
@@ -389,10 +390,11 @@ static uint32_t *dfcpcie_get_iodbst_reg (void)
 
 static void dfcpcie_exit() {
     struct pci_ctrl *pcie = (struct pci_ctrl *) pcie_dfc.ctrl;
+    pcie_dfc.running = 1; /* stop thread */
+    pthread_join(pcie_dfc.io_thread, NULL);
     reset_iosqdb_bits(pcie);
     reset_nvmeregs(pcie);
     reset_fifo(pcie);
-    nvmeKilled = 0;
     pcie_munmap_bars(pcie);
     pcie_munmap_host_mem (pcie);
     if (pcie->dev.bar[2].addr) {
@@ -420,6 +422,7 @@ int dfcpcie_init()
     pcie_dfc.host_io_mem = &((struct pci_ctrl *) pcie_dfc.ctrl)->io_mem;
     pcie_dfc.ops = &pcidfc_ops;
     pcie_dfc.io_dbstride_ptr = dfcpcie_get_iodbst_reg();
+    pcie_dfc.running = 0; /* ready */
 
     return nvm_register_pcie_handler(&pcie_dfc);
 }

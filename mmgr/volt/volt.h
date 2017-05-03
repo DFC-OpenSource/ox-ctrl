@@ -19,7 +19,8 @@
 #define VOLT_SECTOR_SIZE     0x1000
 #define VOLT_OOB_SIZE        0x400
 
-#define VOLT_DMA_SLOT_INDEX  64
+#define VOLT_DMA_SLOT_CH     64
+#define VOLT_DMA_SLOT_INDEX  VOLT_DMA_SLOT_CH * VOLT_CHIP_COUNT
 #define VOLT_DMA_READ        0x1
 #define VOLT_DMA_WRITE       0x2
 
@@ -42,6 +43,7 @@ typedef struct VoltStatus {
 
 typedef struct VoltPage {
     uint8_t         state; /* 0x00-free, 0x01-alive, 0x02-invalid */
+    uint8_t         *data;
 } VoltPage;
 
 typedef struct VoltBlock {
@@ -49,7 +51,6 @@ typedef struct VoltBlock {
     uint16_t        life; /* available writes before die */
     VoltPage        *next_pg;
     VoltPage        *pages;
-    uint8_t         *data;
 } VoltBlock;
 
 typedef struct VoltLun {
@@ -71,7 +72,7 @@ typedef struct VoltCtrl {
 
 struct volt_dma {
     uint8_t         *virt_addr;
-    uint64_t        prp_index;
+    uint32_t        prp_index;
     uint8_t         status; /* nand status */
 };
 

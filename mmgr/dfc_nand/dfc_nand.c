@@ -38,12 +38,20 @@
 #include "dfc_nand.h"
 #include "nand_dma.h"
 #include "../../include/uatomic.h"
+#include "../../include/ox-mq.h"
 
-static atomic_t        nextprp;
-static pthread_mutex_t prp_mutex;
-static pthread_mutex_t prpmap_mutex;
-static uint64_t        prp_map;
-struct nvm_mmgr dfcnand;
+static atomic_t             nextprp;
+static pthread_mutex_t      prp_mutex;
+static pthread_mutex_t      prpmap_mutex;
+static pthread_mutex_t      *bsymap_mutex;
+static uint64_t             prp_map;
+struct nvm_mmgr             dfcnand;
+static struct ox_mq         *nand_mq;
+static uint32_t             *ch_bsymap;
+
+extern struct core_struct core;
+
+static int dfcnand_complete(io_cmd *);
 
 static uint16_t dfcnand_vir_to_phy_lun (uint16_t vir){
     uint16_t lunc = NAND_LUN_COUNT;
@@ -83,12 +91,10 @@ static int dfcnand_get_next_prp(io_cmd *cmd){
     do {
         pthread_mutex_lock(&prp_mutex);
         next = atomic_read(&nextprp);
-
         if (next == DFCNAND_DMA_SLOT_INDEX)
             next = 1;
         else
             next++;
-
         atomic_set(&nextprp, next);
         pthread_mutex_unlock (&prp_mutex);
 
@@ -101,7 +107,6 @@ static int dfcnand_get_next_prp(io_cmd *cmd){
         pthread_mutex_unlock(&prpmap_mutex);
 
         dfcnand_set_prp_map(next, 0x1);
-
         cmd->dfc_io.prp_index = next;
 
         return next - 1;
@@ -111,9 +116,9 @@ static int dfcnand_get_next_prp(io_cmd *cmd){
 static int dfcnand_dma_helper (io_cmd *cmd)
 {
     uint32_t dma_sz;
-    int dma_sec, c = 0, ret = 0;
     uint64_t prp;
     uint8_t direction;
+    int dma_sec, c = 0, ret = 0;
     struct nvm_mmgr_io_cmd *nvm_cmd =
                            (struct nvm_mmgr_io_cmd *) cmd->dfc_io.nvm_mmgr_io;
 
@@ -143,14 +148,121 @@ static int dfcnand_dma_helper (io_cmd *cmd)
     return ret;
 }
 
+static void dfcnand_process_sq (struct ox_mq_entry *req)
+{
+    io_cmd *cmd = (struct io_cmd *) req->opaque;
+
+    cmd->dfc_io.mq_req = (void *) req;
+
+    switch (cmd->dfc_io.cmd_type) {
+        case MMGR_READ_PG:
+            if (nand_page_read(cmd))
+                goto COMPLETE;
+            break;
+        case MMGR_WRITE_PG:
+            if (nand_page_prog(cmd))
+                goto COMPLETE;
+            break;
+        case MMGR_ERASE_BLK:
+            if (nand_block_erase(cmd))
+                goto COMPLETE;
+            break;
+        default:
+            goto COMPLETE;
+    }
+    return;
+
+COMPLETE:
+    cmd->status = 0; /* failed FPGA status */
+    log_err("[MMGR ERROR: Command invalid or FPGA library returned -1]\n");
+    ox_mq_complete_req (nand_mq, req);
+}
+
+static void dfcnand_process_cq (void *opaque)
+{
+    io_cmd *cmd = (struct io_cmd *) opaque;
+
+    dfcnand_complete (cmd);
+}
+
+static void dfcnand_process_to (void **opaque, int counter)
+{
+    /* Nothing to do */
+}
+
+static int dfcnand_start_mq (void)
+{
+    struct ox_mq_config mq_config;
+
+    /* Start NAND multi-queue */
+    mq_config.n_queues = dfcnand.geometry->n_of_ch;
+    mq_config.q_size = 64;
+    mq_config.sq_fn = dfcnand_process_sq;
+    mq_config.cq_fn = dfcnand_process_cq;
+    mq_config.to_fn = dfcnand_process_to;
+    mq_config.to_usec = 0;
+    mq_config.flags = 0;
+    nand_mq = ox_mq_init(&mq_config);
+    if (!nand_mq)
+        return -1;
+
+    return 0;
+}
+
+static int dfcnand_start_ch_traffic (void)
+{
+    int i;
+
+    if (dfcnand.geometry->lun_per_ch > 16) {
+        log_err ("[dfcnand: Channel traffic does not support more than "
+                                                       "16 LUNs per channel\n");
+        return -1;
+    }
+
+    ch_bsymap = calloc(dfcnand.geometry->n_of_ch, sizeof(uint32_t));
+    if (!ch_bsymap)
+        return EMEM;
+
+    bsymap_mutex = malloc(sizeof(pthread_mutex_t) * dfcnand.geometry->n_of_ch);
+    if (!bsymap_mutex) {
+        free(ch_bsymap);
+        return EMEM;
+    }
+
+    for (i = 0; i < dfcnand.geometry->n_of_ch; i++)
+        pthread_mutex_init (&bsymap_mutex[i], NULL);
+
+    return 0;
+}
+
+inline static void dfcnand_ch_traffic_ctrl (struct nvm_mmgr_io_cmd *cmd)
+{
+    io_cmd *nandcmd = (struct io_cmd *) cmd->rsvd;
+    int shift = cmd->ppa.g.lun * dfcnand.geometry->n_of_planes + cmd->ppa.g.pl;
+
+    pthread_mutex_lock(&bsymap_mutex[cmd->ppa.g.ch]);
+
+    /* check if lun is busy, if yes, command has to block the channel */
+    nandcmd->dfc_io.rdy_bsy = (ch_bsymap[cmd->ppa.g.ch] & (1 << shift))
+                                    ? DFCNAND_RDY_BSY_ON : DFCNAND_RDY_BSY_OFF;
+
+    /* if channel is blocked, other luns are ready */
+    ch_bsymap[cmd->ppa.g.ch] = (nandcmd->dfc_io.rdy_bsy) ?
+                                (0x0 & 0xffffffff) | (1 << shift) :
+                                ch_bsymap[cmd->ppa.g.ch] | (1 << shift);
+
+    pthread_mutex_unlock(&bsymap_mutex[cmd->ppa.g.ch]);
+}
+
 static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
-    io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
     int c;
-
+    uint64_t prp_sec;
+    uint32_t prp_map;
     uint32_t sec_sz = NAND_SECTOR_SIZE;
     uint32_t pg_sz  = NAND_PAGE_SIZE;
     uint32_t oob_sz = NAND_OOB_SIZE;
+    io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
 
     /* For now we only accept up to 16K page size and 4K sector size + 1K OOB */
     if (cmd_nvm->pg_sz > pg_sz || cmd_nvm->sec_sz != sec_sz ||
@@ -160,14 +272,17 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
     memset(cmd, 0, sizeof(cmd));
 
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
-    uint32_t prp_map = dfcnand_get_next_prp(cmd);
 
-    cmd->dfc_io.virt_addr = virt_addr[prp_map];
-    memset(cmd->dfc_io.virt_addr, 0, pg_sz + oob_sz);
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS)) {
+        prp_map = dfcnand_get_next_prp(cmd);
+        cmd->dfc_io.virt_addr = virt_addr[prp_map];
+        memset(cmd->dfc_io.virt_addr, 0, pg_sz + oob_sz);
+    } else
+        cmd->dfc_io.virt_addr = (uint8_t *)
+                             (core.nvm_pcie->host_io_mem->addr + cmd_nvm->prp);
 
     cmd->dfc_io.nvm_mmgr_io = cmd_nvm;
 
-    /*Page Read -16K + 1K OOB*/
     cmd->lun = phytl & 0x00ff;
     cmd->chip = cmd_nvm->ppa.g.ch;
     cmd->target = phytl >> 8;
@@ -177,21 +292,35 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     cmd_nvm->n_sectors = cmd_nvm->pg_sz / sec_sz;
 
+    /* Synchronous commands must DMA to LS2 memory, otherwise, DMA to x86 */
     for (c = 0; c < 5; c++) {
-        cmd->len[c] = sec_sz;
-        cmd->host_addr[c] = (uint64_t) phy_addr[prp_map] + sec_sz * c;
-      }
-    cmd->col_addr = 0x0;
-    cmd->len[4] = cmd_nvm->md_sz;
+        prp_sec           = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
+        cmd->len[c]       = (c == 4) ? cmd_nvm->md_sz : sec_sz;
+        cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
+            (uint64_t) phy_addr[prp_map] + sec_sz * c :
+            (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
 
-    if (nand_page_read(cmd))
+        if ((core.run_flag & RUN_TESTS))
+            continue;
+
+        if (!cmd_nvm->sync_count && cmd->host_addr[c] >
+                                        core.nvm_pcie->host_io_mem->paddr +
+                                        core.nvm_pcie->host_io_mem->size)
+            goto CLEAN;
+    }
+    cmd->col_addr = 0x0;
+
+    dfcnand_ch_traffic_ctrl(cmd_nvm);
+
+    if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
     return 0;
 
 CLEAN:
-    log_err("[MMGR Read ERROR: FPGA library returned -1]\n");
-    dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
+    log_err("[MMGR Read ERROR: Failed to enqueue command.]\n");
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
+        dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
 }
@@ -199,13 +328,14 @@ CLEAN:
 static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
     int c;
-    io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
-
+    uint64_t prp_sec;
+    uint32_t prp_map;
     uint32_t sec_sz = NAND_SECTOR_SIZE;
     uint32_t pg_sz  = NAND_PAGE_SIZE;
     uint32_t oob_sz = NAND_OOB_SIZE;
+    io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
 
-    /* For now we only accept up to 16K page size + 1K OOB */
+    /* For now we only accept up to 16K page size and 4K sector size + 1K OOB */
     if (cmd_nvm->pg_sz > pg_sz || cmd_nvm->sec_sz != sec_sz ||
                                                      cmd_nvm->md_sz > oob_sz)
         return -1;
@@ -213,12 +343,15 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
     memset(cmd, 0, sizeof(cmd));
 
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
-    uint32_t prp_map = dfcnand_get_next_prp(cmd);
+
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS)) {
+        prp_map = dfcnand_get_next_prp(cmd);
+        cmd->dfc_io.virt_addr = virt_addr[prp_map];
+    } else
+        cmd->dfc_io.virt_addr = (uint8_t *)
+                             (core.nvm_pcie->host_io_mem->addr + cmd_nvm->prp);
 
     cmd->dfc_io.nvm_mmgr_io = cmd_nvm;
-
-    /*Page Write -16K + 1K OOB*/
-    cmd->dfc_io.virt_addr = virt_addr[prp_map];
 
     cmd->lun = phytl & 0x00ff;
     cmd->chip = cmd_nvm->ppa.g.ch;
@@ -229,23 +362,38 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     cmd_nvm->n_sectors = cmd_nvm->pg_sz / sec_sz;
 
-    if (dfcnand_dma_helper (cmd))
-        goto CLEAN;
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
+        if (dfcnand_dma_helper (cmd))
+            goto CLEAN;
 
+    /* Synchronous commands must DMA to LS2 memory, otherwise, DMA to x86 */
     for (c = 0; c < 5; c++) {
-        cmd->len[c] = sec_sz;
-        cmd->host_addr[c] = (uint64_t)phy_addr[prp_map] + sec_sz * c;
-    }
-    cmd->len[4] = cmd_nvm->md_sz;
+        prp_sec           = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
+        cmd->len[c]       = (c == 4) ? cmd_nvm->md_sz : sec_sz;
+        cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
+            (uint64_t) phy_addr[prp_map] + sec_sz * c :
+            (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
 
-    if (nand_page_prog(cmd))
+        if ((core.run_flag & RUN_TESTS))
+            continue;
+
+        if (!cmd_nvm->sync_count && cmd->host_addr[c] >
+                                        core.nvm_pcie->host_io_mem->paddr +
+                                        core.nvm_pcie->host_io_mem->size)
+            goto CLEAN;
+    }
+
+    dfcnand_ch_traffic_ctrl(cmd_nvm);
+
+    if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
     return 0;
 
 CLEAN:
-    log_err("[MMGR Write ERROR: DMA or FPGA library returned -1]\n");
-    dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
+    log_err("[MMGR Write ERROR: Failed to enqueue command.]\n");
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
+        dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
 }
@@ -254,6 +402,7 @@ static int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
     io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
+
     memset(cmd, 0, sizeof(cmd));
     cmd->dfc_io.nvm_mmgr_io = cmd_nvm;
     cmd->chip = cmd_nvm->ppa.g.ch;
@@ -264,13 +413,15 @@ static int dfcnand_erase_blk (struct nvm_mmgr_io_cmd *cmd_nvm)
     cmd->len[0] = 0;
     cmd->dfc_io.cmd_type = MMGR_ERASE_BLK;
 
-    if (nand_block_erase(cmd))
+    dfcnand_ch_traffic_ctrl(cmd_nvm);
+
+    if (ox_mq_submit_req(nand_mq, cmd->chip, cmd))
         goto CLEAN;
 
     return 0;
 
 CLEAN:
-    log_err("[MMGR Erase ERROR: FPGA library returned -1]\n");
+    log_err("[MMGR Erase ERROR: Failed to enqueue command.]\n");
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
 }
@@ -278,13 +429,18 @@ CLEAN:
 static void dfcnand_exit (struct nvm_mmgr *mmgr)
 {
     int i;
+
+    ox_mq_destroy(nand_mq);
     nand_dm_deinit();
     pthread_mutex_destroy(&prp_mutex);
     pthread_mutex_destroy(&prpmap_mutex);
     for (i = 0; i < mmgr->geometry->n_of_ch; i++) {
-        free(mmgr->ch_info->mmgr_rsv_list);
-        free(mmgr->ch_info->ftl_rsv_list);
+        free(mmgr->ch_info[i].mmgr_rsv_list);
+        free(mmgr->ch_info[i].ftl_rsv_list);
+        pthread_mutex_destroy(&bsymap_mutex[i]);
     }
+    free(ch_bsymap);
+    free(bsymap_mutex);
 }
 
 static int dfcnand_io_rsv_blk (struct nvm_channel *ch, uint8_t cmdtype,
@@ -329,9 +485,8 @@ static int dfcnand_read_nvminfo (struct nvm_channel *ch)
     if (!buf)
         return EMEM;
 
-    for (i = 0; i < ch->geometry->n_of_planes; i++) {
+    for (i = 0; i < ch->geometry->n_of_planes; i++)
         buf_vec[i] = buf + i * buf_sz;
-    }
 
     pg = 0;
     do {
@@ -370,9 +525,8 @@ static int dfcnand_flush_nvminfo (struct nvm_channel *ch)
     if (!buf)
         return EMEM;
 
-    for (i = 0; i < ch->geometry->n_of_planes; i++) {
+    for (i = 0; i < ch->geometry->n_of_planes; i++)
         buf_vec[i] = buf + i * buf_sz;
-    }
 
     pg = 0;
     do {
@@ -409,7 +563,7 @@ static int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
     int i;
 
-    for(i = 0; i < nc; i++){
+    for(i = 0; i < nc; i++) {
         if(dfcnand_flush_nvminfo (&ch[i]))
             return -1;
     }
@@ -420,8 +574,9 @@ static int dfcnand_set_ch_info (struct nvm_channel *ch, uint16_t nc)
 static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 {
     int i, n, pl, nsp = 0, trsv;
+    struct nvm_ppa_addr *ppa;
 
-    for(i = 0; i < nc; i++){
+    for (i = 0; i < nc; i++) {
         ch[i].ch_mmgr_id = i;
         ch[i].mmgr = &dfcnand;
         ch[i].geometry = dfcnand.geometry;
@@ -441,7 +596,6 @@ static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
                        NAND_PLANE_COUNT *
                        NAND_PAGE_COUNT;
 
-
         ch[i].mmgr_rsv = DFCNAND_RESV_BLK_COUNT;
         trsv = ch[i].mmgr_rsv * NAND_PLANE_COUNT;
         ch[i].mmgr_rsv_list = malloc (trsv * sizeof(struct nvm_ppa_addr));
@@ -453,10 +607,18 @@ static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 
         for (n = 0; n < ch[i].mmgr_rsv; n++) {
             for (pl = 0; pl < NAND_PLANE_COUNT; pl++) {
-                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.blk = n;
-                ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl].g.pl = pl;
+                ppa = &ch[i].mmgr_rsv_list[NAND_PLANE_COUNT * n + pl];
+                ppa->g.ch = ch[i].ch_mmgr_id;
+                ppa->g.lun = 0;
+                ppa->g.blk = n;
+                ppa->g.pl = pl;
             }
         }
+
+        ch[i].ftl_rsv = 0;
+        ch[i].ftl_rsv_list = malloc (sizeof(struct nvm_ppa_addr));
+        if (!ch[i].ftl_rsv_list)
+            return EMEM;
 
         ch[i].tot_bytes = 0;
         ch[i].slba = 0;
@@ -469,25 +631,34 @@ static int dfcnand_get_ch_info (struct nvm_channel *ch, uint16_t nc)
 
 int dfcnand_callback(io_cmd *cmd)
 {
-    int ret;
-    struct nvm_mmgr_io_cmd *nvm_cmd =
-                           (struct nvm_mmgr_io_cmd *) cmd->dfc_io.nvm_mmgr_io;
+    struct ox_mq_entry *mq_entry = (struct ox_mq_entry *) cmd->dfc_io.mq_req;
+    ox_mq_complete_req (nand_mq, mq_entry);
+}
 
-    if (nvm_memcheck(nvm_cmd) || nvm_cmd->status == NVM_IO_TIMEOUT)
+static int dfcnand_complete(io_cmd *cmd)
+{
+    int ret = 0;
+    struct nvm_mmgr_io_cmd *nvm_cmd = cmd->dfc_io.nvm_mmgr_io;
+
+    if (nvm_memcheck(nvm_cmd))
+        goto OUT;
+
+    if (nvm_cmd->status == NVM_IO_TIMEOUT)
         goto OUT;
 
     if (cmd->status) {
-        if (cmd->dfc_io.cmd_type == MMGR_READ_PG)
+        if ((nvm_cmd->sync_count || (core.run_flag & RUN_TESTS))
+                                       && cmd->dfc_io.cmd_type == MMGR_READ_PG)
             ret = dfcnand_dma_helper (cmd);
 
         nvm_cmd->status = (ret) ? NVM_IO_FAIL : NVM_IO_SUCCESS;
-    } else {
+    } else
         nvm_cmd->status = NVM_IO_FAIL;
-    }
 
 OUT:
-    if (cmd->dfc_io.cmd_type == MMGR_WRITE_PG || cmd->dfc_io.cmd_type ==
-                                                                  MMGR_READ_PG)
+    if ((nvm_cmd->sync_count || (core.run_flag & RUN_TESTS)) &&
+            (cmd->dfc_io.cmd_type == MMGR_WRITE_PG || cmd->dfc_io.cmd_type ==
+                                                                  MMGR_READ_PG))
         dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
 
     nvm_callback(nvm_cmd);
@@ -524,11 +695,17 @@ int mmgr_dfcnand_init()
     dfcnand.geometry = &dfcnand_geo;
 
     ret = nand_dm_init();
-    if(ret) {
+    if (ret) {
         syslog(LOG_ERR, "dfcnand: Not possible to start NAND manager.");
-        return -1;
+        return EMMGR_REGISTER;
     }
     ret = dfcnand_start_prp_map();
+    if (ret) return ret;
+
+    ret = dfcnand_start_mq();
+    if (ret) return ret;
+
+    ret = dfcnand_start_ch_traffic();
     if (ret) return ret;
 
     return nvm_register_mmgr(&dfcnand);
