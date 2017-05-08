@@ -14,7 +14,7 @@ Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctr
 READ : ~385 MB/s
 WRITE: ~298 MB/s
 
-The FPGA 03.00.01 provides a throughtput of 400 MB/s READ and 300 MB/s WRITE. There is
+The FPGA 03.01.00 provides a throughtput of 400 MB/s READ and 300 MB/s WRITE. There is
 a small overhead for reads. We intend to fix it for the next release.
 ```
 ![OX Controller bandwidth](https://i.imgsafe.org/9dcabe74c2.png)
@@ -39,7 +39,7 @@ $ ox-ctrl
 
 # The host kernel
 
-LightNVM is the Linux kernel support for Open-Channel SSDs. It is included in the kernel since version 4.4. For a better OX experience, we recommend the kernel 4.12 provided by the Open-Channel SSD Community (https://github.com/OpenChannelSSD/linux/tree/for-4.12/core). This kernel enables liblightnvm (http://lightnvm.io/liblightnvm/), the user-space library for Open-Channel SSDs. 
+LightNVM is the Linux kernel support for Open-Channel SSDs. It is included in the kernel since version 4.4. For a better OX experience, we recommend the kernel 4.11 or higher. It enables liblightnvm (http://lightnvm.io/liblightnvm/), the user-space library for Open-Channel SSDs. 
 
 Installing this kernel, you will be able to run a wide set of workloads on the DFC using FOX (https://github.com/DFC-OpenSource/fox), a tool for testing Open-Channel SSDs.
 
@@ -69,8 +69,8 @@ GRUB_CMDLINE_LINUX_DEFAULT="quiet splash blacklist=nvme mem=8G"
 # FOX testing setup:
 ```
 
-- Install the right kernel with user IO support (soon uptream in kernel 4.12), for now use:
-  - https://github.com/OpenChannelSSD/linux/tree/for-4.12/core
+- Install the right kernel with user IO support (uptream in kernel 4.11):
+  - https://www.kernel.org/
   
 - Blacklist the nvme driver (not necessary in QEMU. For the DFC, we use an OX-enabled driver);
 
@@ -90,7 +90,7 @@ GRUB_CMDLINE_LINUX_DEFAULT="quiet splash blacklist=nvme mem=8G"
   lnvm: Dragon Fire Card NVMe Driver support.
   nvm: registered nvme0n1 [4/2/512/1024/32/8]
   
-- Run the tests with the tool (https://github.com/ivpi/fox), or use liblightnvm as you wish.
+- Run the tests with the tool (https://github.com/DFC-OpenSource/fox), or use liblightnvm as you wish.
 ```
 
 # FTL support:
