@@ -322,6 +322,9 @@ static void *ox_mq_cq_thread (void *arg)
         ox_mq_reset_entry (req);
         OX_MQ_ENQUEUE (&q->cq_free, req, &q->cq_free_mutex, &q->stats.cq_free);
 
+        if (!opaque)
+            continue;
+
         q->cq_fn (opaque);
     }
 
