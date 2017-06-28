@@ -43,7 +43,6 @@
 #include "include/uatomic.h"
 
 extern struct core_struct core;
-uint16_t blk;
 
 uint8_t lnvm_dev(NvmeCtrl *n)
 {
@@ -81,7 +80,7 @@ void lnvm_set_default(LnvmCtrl *ctrl)
     ctrl->params.num_ch = LNVM_CH;
     ctrl->params.num_lun = LNVM_LUN_CH;
     ctrl->params.num_pln = LNVM_PLANES;
-    /*ctrl->params.num_blk*/blk = LNVM_BLK_LUN;
+    ctrl->params.num_blk = LNVM_BLK_LUN;
     ctrl->bb_gen_freq = LNVM_BB_GEN_FREQ;
     ctrl->err_write = LNVM_ERR_WRITE;
 }
@@ -499,7 +498,7 @@ int lnvm_init(NvmeCtrl *n)
         c->num_ch = ln->params.num_ch;
         c->num_lun = ln->params.num_lun;
         c->num_pln = ln->params.num_pln;
-        c->num_blk = blk;//ln->params.num_blk;
+        c->num_blk = ln->params.num_blk;
         c->num_pg = ln->params.pgs_per_blk;
         c->csecs = ln->params.sec_size;
         c->fpg_sz = ln->params.sec_size * ln->params.secs_per_pg;
