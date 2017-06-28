@@ -244,7 +244,8 @@ static int volt_init_luns(void)
         return VOLT_MEM_ERROR;
 
     for (i_lun = 0; i_lun < total_luns; i_lun++)
-        volt->luns[i_lun].blk_offset = &volt->blocks[i_lun * geo->blk_per_lun];
+        volt->luns[i_lun].blk_offset =
+                    &volt->blocks[i_lun * geo->blk_per_lun * geo->n_of_planes];
 
     return VOLT_MEM_OK;
 }
@@ -474,7 +475,7 @@ static int volt_prepare_rw (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     memset(dma, 0, sizeof(struct volt_dma));
 
-    uint64_t prp_map = volt_get_next_prp(dma, cmd_nvm->ppa.g.ch);
+    uint32_t prp_map = volt_get_next_prp(dma, cmd_nvm->ppa.g.ch);
 
     dma->virt_addr = dma_buf[(cmd_nvm->ppa.g.ch * VOLT_DMA_SLOT_CH) + prp_map];
 
