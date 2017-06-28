@@ -57,13 +57,11 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
     printf(" Number of sectors: %d\n", size);
     printf(" DMA size: %lu (data) + %lu (meta) = %lu bytes\n",
                                                  dt_sz, md_sz, dt_sz + md_sz);
-    for (i = 0; i < size; i++) {
-        printf (" [ppa(%d): ch: %d, lun: %d, blk: %d, pl: %d, pg: %d, "
-                "sec: %d]\n", i, list[i].g.ch, list[i].g.lun, list[i].g.blk,
-                list[i].g.pl, list[i].g.pg, list[i].g.sec);
-    }
     for (i = 0; i < size; i++)
-        printf (" [prp(%d): 0x%016lx\n", i, prp[i]);
+        printf (" [ppa(%d): ch: %d, lun: %d, blk: %d, pl: %d, pg: %d, "
+                                "sec: %d] prp: 0x%016lx\n", i, list[i].g.ch,
+                                list[i].g.lun, list[i].g.blk, list[i].g.pl,
+                                list[i].g.pg, list[i].g.sec, prp[i]);
     printf (" [meta_prp(0): 0x%016lx\n", md_prp[0]);
 }
 

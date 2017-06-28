@@ -163,10 +163,12 @@ static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
 
     if (cmd->cmdtype == MMGR_ERASE_BLK) {
         mio->ppa = cmd->ppalist[index];
+        mio->ch = cmd->channel[index];
         return 0;
     }
 
     mio->ppa = cmd->ppalist[index * LNVM_SEC_PG];
+    mio->ch = cmd->channel[index * LNVM_SEC_PG];
 
     /* TODO: ALLOW WRITES ON PAGE GRANULARITY AND READS ON SECTOR GRANULARITY */
 

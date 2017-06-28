@@ -810,7 +810,6 @@ uint16_t nvme_rw (NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     off_count = (aio_slba % (NVME_KERNEL_PG_SIZE/(1<<data_shift)));
 
     req->nvm_io.sec_sz = NVME_KERNEL_PG_SIZE;
-    req->nvm_io.channel = 0; /* */
     req->nvm_io.cmdtype = (req->is_write) ? MMGR_WRITE_PG : MMGR_READ_PG;
     req->nvm_io.n_sec = nlb;
     req->nvm_io.prp[0] = prp1;

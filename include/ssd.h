@@ -122,6 +122,7 @@ struct nvm_io_status {
 struct nvm_mmgr_io_cmd {
     struct nvm_io_cmd       *nvm_io;
     struct nvm_ppa_addr     ppa;
+    struct nvm_channel      *ch;
     uint64_t                prp[32]; /* max of 32 sectors */
     uint64_t                md_prp;
     uint8_t                 status;
@@ -142,7 +143,7 @@ struct nvm_mmgr_io_cmd {
 
 struct nvm_io_cmd {
     uint64_t                    cid;
-    struct nvm_channel          *channel;
+    struct nvm_channel          *channel[64];
     struct nvm_ppa_addr         ppalist[64];
     struct nvm_io_status        status;
     struct nvm_mmgr_io_cmd      mmgr_io[64];
@@ -314,6 +315,7 @@ struct nvm_ftl {
     uint16_t                bbtbl_format;
     uint8_t                 nq; /* Number of queues/threads, up to 64 per FTL */
     struct ox_mq            *mq;
+    uint16_t                next_queue;
     LIST_ENTRY(nvm_ftl)     entry;
 };
 

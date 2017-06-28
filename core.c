@@ -126,9 +126,19 @@ static struct nvm_ftl *nvm_get_ftl_instance(uint16_t ftl_id)
     return NULL;
 }
 
-static uint16_t nvm_ftl_q_schedule (struct nvm_ftl *ftl, struct nvm_io_cmd *cmd)
+static uint16_t nvm_ftl_q_schedule (struct nvm_ftl *ftl,
+                                      struct nvm_io_cmd *cmd, uint8_t multi_ch)
 {
-    return cmd->channel->ch_id % ftl->nq;
+    uint16_t qid;
+
+    if (!multi_ch)
+        return cmd->channel[0]->ch_id % ftl->nq;
+    else {
+        qid = ftl->next_queue;
+        ftl->next_queue = (ftl->next_queue + 1 == ftl->nq) ?
+                                                       0 : ftl->next_queue + 1;
+        return qid;
+    }
 }
 
 static void nvm_complete_to_host (struct nvm_io_cmd *cmd)
@@ -154,7 +164,7 @@ void nvm_complete_ftl (struct nvm_io_cmd *cmd)
 
     retry = NVM_QUEUE_RETRY;
     do {
-        ret = ox_mq_complete_req(cmd->channel->ftl->mq, req);
+        ret = ox_mq_complete_req(cmd->channel[0]->ftl->mq, req);
         if (ret) {
             retry--;
             usleep (NVM_QUEUE_RETRY_SLEEP);
@@ -165,7 +175,7 @@ void nvm_complete_ftl (struct nvm_io_cmd *cmd)
 static void nvm_ftl_process_sq (struct ox_mq_entry *req)
 {
     struct nvm_io_cmd *cmd = (struct nvm_io_cmd *) req->opaque;
-    struct nvm_ftl *ftl = cmd->channel->ftl;
+    struct nvm_ftl *ftl = cmd->channel[0]->ftl;
     int ret;
 
     cmd->mq_req = (void *) req;
@@ -214,6 +224,8 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
     ftl->mq = ox_mq_init(&mq_config);
     if (!ftl->mq)
         return EFTL_REGISTER;
+
+    ftl->next_queue = 0;
 
     core.ftl_q_count += ftl->nq;
 
@@ -265,16 +277,17 @@ void nvm_callback (struct nvm_mmgr_io_cmd *cmd)
         }
         pthread_mutex_unlock(cmd->sync_mutex);
     } else {
-        cmd->nvm_io->channel->ftl->ops->callback_io(cmd);
+        cmd->ch->ftl->ops->callback_io(cmd);
     }
 }
 
 int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 {
-    struct nvm_channel *ch;
+    struct nvm_ftl *ftl;
     int ret, retry, i, qid;
+    uint8_t ch_ppa[core.nvm_ch_count];
+    uint8_t multi_ch = 0;
     NvmeRequest *req = (NvmeRequest *) cmd->req;
-    uint8_t aux_ch;
 
     cmd->status.nvme_status = NVME_SUCCESS;
 
@@ -299,26 +312,31 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 
 #if LIGHTNVM
     /* For now, the host ppa channel must be aligned with core.nvm_ch[] */
-    /* All ppas within the vector must address to the same channel */
-    aux_ch = cmd->ppalist[0].g.ch;
+    /* All PPAs in the vector must address channels managed by the same FTL */
+    if (cmd->ppalist[0].g.ch >= core.nvm_ch_count)
+        goto CH_ERR;
 
-    if (aux_ch >= core.nvm_ch_count) {
-        syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
-        req->status = NVME_CMD_ABORT_REQ;
-        nvm_complete_to_host(cmd);
-        return NVME_CMD_ABORT_REQ;
+    ftl = core.nvm_ch[cmd->ppalist[0].g.ch]->ftl;
+
+    memset (ch_ppa, 0, sizeof (uint8_t) * core.nvm_ch_count);
+
+    /* Per PPA checking */
+    for (i = 0; i < cmd->n_sec; i++) {
+        if (cmd->ppalist[i].g.ch >= core.nvm_ch_count)
+            goto CH_ERR;
+
+        ch_ppa[cmd->ppalist[i].g.ch]++;
+
+        if (!multi_ch && cmd->ppalist[i].g.ch != cmd->ppalist[0].g.ch)
+            multi_ch++;
+
+        if (core.nvm_ch[cmd->ppalist[i].g.ch]->ftl != ftl)
+            goto FTL_ERR;
+
+        /* Set channel per PPA */
+        cmd->channel[i] = core.nvm_ch[cmd->ppalist[i].g.ch];
     }
 
-    for (i = 1; i < cmd->n_sec; i++) {
-        if (cmd->ppalist[i].g.ch != aux_ch) {
-            syslog(LOG_INFO,"[nvm ERROR: IO failed, ch does not match.]\n");
-            req->status = NVME_INVALID_FIELD;
-            nvm_complete_to_host(cmd);
-            return NVME_INVALID_FIELD;
-        }
-    }
-
-    ch = core.nvm_ch[aux_ch];
 #else
     /* For now all channels must be included in the global namespace */
     for (i = 0; i < core.nvm_ch_count; i++) {
@@ -335,25 +353,36 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 #endif /* LIGHTNVM */
 
     cmd->status.status = NVM_IO_PROCESS;
-    cmd->channel = ch;
     retry = NVM_QUEUE_RETRY;
 
-    qid = nvm_ftl_q_schedule (ch->ftl, cmd);
+    qid = nvm_ftl_q_schedule (ftl, cmd, multi_ch);
     do {
-        ret = ox_mq_submit_req(ch->ftl->mq, qid, cmd);
+        ret = ox_mq_submit_req(ftl->mq, qid, cmd);
 
-    	if (ret)
+        if (ret)
             retry--;
-        else if (core.debug)
-            printf(" CMD cid: %lu, type: 0x%x submitted to FTL. \n  Channel: "
-                  "%d, FTL queue %d\n", cmd->cid, cmd->cmdtype, ch->ch_id, qid);
-
+        else if (core.debug) {
+            printf(" CMD cid: %lu, type: 0x%x submitted to FTL. "
+                               "FTL queue: %d\n", cmd->cid, cmd->cmdtype, qid);
+            for (i = 0; i < core.nvm_ch_count; i++)
+                if (ch_ppa[i] > 0)
+                    printf("  Channel: %d, PPAs: %d\n", i, ch_ppa[i]);
+        }
     } while (ret && retry);
 
-    if (core.debug)
-        usleep (150000);
-
     return (retry) ? NVME_NO_COMPLETE : NVME_CMD_ABORT_REQ;
+
+CH_ERR:
+    log_err("[nvm ERROR: IO failed, channel not found.]\n");
+    req->status = NVME_CMD_ABORT_REQ;
+    nvm_complete_to_host(cmd);
+    return NVME_CMD_ABORT_REQ;
+
+FTL_ERR:
+    log_err("[nvm ERROR: IO failed, channels do not match FTL.]\n");
+    req->status = NVME_INVALID_FIELD;
+    nvm_complete_to_host(cmd);
+    return NVME_INVALID_FIELD;
 }
 
 int nvm_dma (void *ptr, uint64_t prp, ssize_t size, uint8_t direction)
@@ -385,11 +414,11 @@ int nvm_submit_mmgr (struct nvm_mmgr_io_cmd *cmd)
 
     switch (cmd->nvm_io->cmdtype) {
         case MMGR_WRITE_PG:
-            return cmd->nvm_io->channel->mmgr->ops->write_pg(cmd);
+            return cmd->ch->mmgr->ops->write_pg(cmd);
         case MMGR_READ_PG:
-            return cmd->nvm_io->channel->mmgr->ops->read_pg(cmd);
+            return cmd->ch->mmgr->ops->read_pg(cmd);
         case MMGR_ERASE_BLK:
-            return cmd->nvm_io->channel->mmgr->ops->erase_blk(cmd);
+            return cmd->ch->mmgr->ops->erase_blk(cmd);
         default:
             return -1;
     }
