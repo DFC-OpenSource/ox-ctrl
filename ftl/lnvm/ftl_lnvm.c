@@ -154,7 +154,6 @@ static void lnvm_callback_io (struct nvm_mmgr_io_cmd *cmd)
 static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
 {
     int c;
-    uint8_t plane;
     struct nvm_ppa_addr *ppa;
     struct nvm_mmgr_io_cmd *mio = &cmd->mmgr_io[index];
 
@@ -169,9 +168,7 @@ static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
 
     mio->ppa = cmd->ppalist[index * LNVM_SEC_PG];
 
-    /* We put planes manually, for now */
-    plane = index % LNVM_PLANES;
-    mio->ppa.g.pl = plane;
+    /* TODO: ALLOW WRITES ON PAGE GRANULARITY AND READS ON SECTOR GRANULARITY */
 
     /* We check ppa addresses for only for multiple sector page IOs */
     if (!cmd->sec_offset || (cmd->sec_offset &&
@@ -193,11 +190,11 @@ static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
         return -1;
 
     /* If offset is positive, last pg_size is smaller */
-    mio->pg_sz = (index+1 == cmd->status.total_pgs && cmd->sec_offset) ?
+    mio->pg_sz = ((index+1 == cmd->status.total_pgs) && cmd->sec_offset) ?
                                 cmd->sec_sz * cmd->sec_offset : LNVM_PG_SIZE;
     mio->sec_sz = cmd->sec_sz;
     mio->n_sectors = mio->pg_sz / mio->sec_sz;
-    mio->md_sz = cmd->md_sz / cmd->status.total_pgs;
+    mio->md_sz = LNVM_SEC_OOBSZ * mio->n_sectors;
 
     for (c = 0; c < mio->n_sectors; c++)
         mio->prp[c] = cmd->prp[index * LNVM_SEC_PG + c];
