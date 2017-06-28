@@ -253,6 +253,15 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         psl[0].ppa = spba;
     }
 
+    /* In case of single PPA, we make the vector for multiple planes */
+    if (nlb < LNVM_PLANES) {
+        nlb = LNVM_PLANES;
+        for (i = 1; i < nlb; i++) {
+            psl[i].ppa = psl[0].ppa;
+            psl[i].g.pl = i;
+        }
+    }
+
     req->meta_size = 0;
     req->status = NVME_SUCCESS;
     req->nlb = nlb;
