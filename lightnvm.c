@@ -271,7 +271,6 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     req->nvm_io.cmdtype = MMGR_ERASE_BLK;
     req->nvm_io.n_sec = nlb;
     req->nvm_io.req = (void *) req;
-    req->nvm_io.sec_offset = 0;
     req->nvm_io.status.pg_errors = 0;
     req->nvm_io.status.ret_t = 0;
     req->nvm_io.status.pgs_p = 0;
@@ -316,30 +315,24 @@ static inline uint64_t nvme_gen_to_dev_addr(LnvmCtrl *ln,struct nvm_ppa_addr *r)
 
 uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
 {
+    int i, pg, nsec;
+    uint64_t sppa, eppa, moff;
+
     LnvmCtrl *ln = &n->lightnvm_ctrl;
     LnvmRwCmd *lrw = (LnvmRwCmd *)cmd;
-    int i;
-
-    uint64_t sppa, eppa, sec_offset;
-    uint32_t nlb  = lrw->nlb + 1;
-    uint64_t prp1 = lrw->prp1;
-    uint64_t prp2 = lrw->prp2;
-    uint64_t spba = lrw->spba;
-    uint64_t meta = lrw->metadata;
     struct nvm_ppa_addr *psl = req->nvm_io.ppalist;
 
-    const uint8_t lba_index = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
-    const uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
-    const uint16_t oob = ns->id_ns.lbaf[lba_index].ms;
+    uint32_t nlb  = lrw->nlb + 1;
+    uint64_t spba = lrw->spba;
+    uint64_t meta = lrw->metadata;
+
+    uint8_t lba_index = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
+    uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
+    uint16_t oob = ns->id_ns.lbaf[lba_index].ms;
     uint64_t data_size = nlb << data_shift;
     uint32_t n_sectors = data_size / LNVM_SECSZ;
-    uint32_t n_pages = data_size / LNVM_PG_SIZE;
 
-    uint64_t meta_size = (LNVM_SEC_OOBSZ * n_sectors > oob) ?
-             (n_pages < 1) ? oob : nlb * oob :
-             (n_pages < 1) ? LNVM_SEC_OOBSZ * n_sectors : nlb * LNVM_SEC_OOBSZ;
-
-    sec_offset = (data_size % LNVM_PG_SIZE) / (1 << data_shift);
+    uint64_t meta_size = oob * nlb;
 
     uint16_t is_write = (lrw->opcode == LNVM_CMD_PHYS_WRITE ||
                                           lrw->opcode == LNVM_CMD_HYBRID_WRITE);
@@ -348,17 +341,11 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
 
         log_info( "[ERROR lnvm: npages too large (%u). "
                 "Max:%u supported]\n", n_sectors, ln->params.max_sec_per_rq);
-        nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
-                offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
         return NVME_INVALID_FIELD | NVME_DNR;
 
     } else if (n_sectors > 1) {
-
-        if (spba == LNVM_PBA_UNMAPPED || !spba) {
-            nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
-                    offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
+        if (spba == LNVM_PBA_UNMAPPED || !spba)
             return NVME_INVALID_FIELD | NVME_DNR;
-        }
 
         nvme_read_from_host((void *)psl, spba, n_sectors * sizeof(uint64_t));
     } else {
@@ -372,15 +359,13 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     if (n_sectors > 1)
         eppa = nvme_gen_to_dev_addr(ln, &psl[n_sectors - 1]);
 
-    req->nvm_io.prp[0] = prp1;
+    req->nvm_io.prp[0] = lrw->prp1;
 
-    if (n_sectors == 2) {
-        req->nvm_io.prp[1] = prp2;
-    }
-
-    if (n_sectors > 2)
-        nvme_read_from_host((void *)(&req->nvm_io.prp[1]), prp2, (n_sectors-1)
-                                                        * sizeof(uint64_t));
+    if (n_sectors == 2)
+        req->nvm_io.prp[1] = lrw->prp2;
+    else if (n_sectors > 2)
+        nvme_read_from_host((void *)(&req->nvm_io.prp[1]), lrw->prp2,
+                                             (n_sectors-1) * sizeof(uint64_t));
 
     meta_size = (meta) ? meta_size : 0;
     req->slba = sppa;
@@ -395,36 +380,49 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     req->nvm_io.cmdtype = (req->is_write) ? MMGR_WRITE_PG : MMGR_READ_PG;
     req->nvm_io.n_sec = nlb;
     req->nvm_io.req = (void *) req;
-    req->nvm_io.sec_offset = sec_offset; // 4k page inside a plane page
+
     req->nvm_io.status.pg_errors = 0;
     req->nvm_io.status.ret_t = 0;
     req->nvm_io.status.pgs_p = 0;
     req->nvm_io.status.pgs_s = 0;
-    req->nvm_io.status.total_pgs = (sec_offset) ? (nlb / LNVM_SEC_PG) + 1 :
-                                                                      n_pages;
     req->nvm_io.status.status = NVM_IO_NEW;
 
     for (i = 0; i < 8; i++)
         req->nvm_io.status.pg_map[i] = 0;
 
-    for (i = 0; i < req->nvm_io.status.total_pgs; i++) {
-        req->nvm_io.mmgr_io[i].pg_index = i;
-        req->nvm_io.mmgr_io[i].status = NVM_IO_SUCCESS;
-        req->nvm_io.mmgr_io[i].nvm_io = &req->nvm_io;
-        req->nvm_io.mmgr_io[i].pg_sz = LNVM_PG_SIZE;
-        req->nvm_io.mmgr_io[i].sync_count = NULL;
-        req->nvm_io.mmgr_io[i].sync_mutex = NULL;
-        req->nvm_io.md_prp[i] = (meta && meta_size) ?
-                                meta + (LNVM_SEC_OOBSZ * LNVM_SEC_PG * i) : 0;
+    pg = 0;
+    nsec = 0;
+    moff = meta;
+    for (i = 0; i <= nlb; i++) {
+        if ((i == nlb) || (i && (
+                      psl[i].g.ch != psl[i - 1].g.ch ||
+                      psl[i].g.lun != psl[i - 1].g.lun ||
+                      psl[i].g.blk != psl[i - 1].g.blk ||
+                      psl[i].g.pg != psl[i - 1].g.pg ||
+                      psl[i].g.pl != psl[i - 1].g.pl))) {
+
+            req->nvm_io.mmgr_io[pg].pg_index = pg;
+            req->nvm_io.mmgr_io[pg].status = NVM_IO_SUCCESS;
+            req->nvm_io.mmgr_io[pg].nvm_io = &req->nvm_io;
+            req->nvm_io.mmgr_io[pg].pg_sz = nsec * LNVM_SECSZ;
+            req->nvm_io.mmgr_io[pg].n_sectors = nsec;
+            req->nvm_io.mmgr_io[pg].sec_offset = i - nsec;
+            req->nvm_io.mmgr_io[pg].sync_count = NULL;
+            req->nvm_io.mmgr_io[pg].sync_mutex = NULL;
+            req->nvm_io.md_prp[pg] = (meta && meta_size) ? moff : 0;
+
+            pg++;
+            nsec = 0;
+            moff = meta + (oob * i);
+        }
+        nsec++;
     }
+
+    req->nvm_io.status.total_pgs = pg;
 
     if (core.debug)
         lnvm_debug_print_io (req->nvm_io.ppalist, req->nvm_io.prp,
                                 req->nvm_io.md_prp, nlb, data_size, meta_size);
-
-    /* NULL IO */
-    if (core.null)
-        return 0;
 
     return nvm_submit_ftl(&req->nvm_io);
 }

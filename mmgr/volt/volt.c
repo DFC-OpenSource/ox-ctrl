@@ -297,10 +297,10 @@ FREE:
 
 static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
 {
-    uint32_t dma_sz;
-    int dma_sec, c = 0, ret = 0;
+    uint32_t dma_sz, sec_map = 0, dma_sec, i, c = 0, ret = 0;
     uint64_t prp;
     uint8_t direction;
+    uint8_t *oob_addr;
     struct volt_dma *dma = (struct volt_dma *) nvm_cmd->rsvd;
 
     switch (nvm_cmd->cmdtype) {
@@ -316,10 +316,26 @@ static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
             return -1;
     }
 
+    oob_addr = dma->virt_addr + nvm_cmd->sec_sz * nvm_cmd->n_sectors;
     dma_sec = nvm_cmd->n_sectors + 1;
+
     for (; c < dma_sec; c++) {
         dma_sz = (c == dma_sec - 1) ? nvm_cmd->md_sz : nvm_cmd->sec_sz;
         prp = (c == dma_sec - 1) ? nvm_cmd->md_prp : nvm_cmd->prp[c];
+
+        if (!prp) {
+            sec_map |= 1 << c;
+            continue;
+        }
+
+        /* Fix metadata per sector in case of reading single sector */
+        if (sec_map && nvm_cmd->cmdtype == MMGR_READ_PG &&
+                                            nvm_cmd->md_sz && c == dma_sec - 1)
+            for (i = 0; i < nvm_cmd->n_sectors - 1; i++)
+                if (sec_map & 1 << i)
+                    memcpy (oob_addr + LNVM_SEC_OOBSZ * i,
+                            oob_addr + LNVM_SEC_OOBSZ * (i + 1),
+                            LNVM_SEC_OOBSZ * (nvm_cmd->n_sectors - i - 1));
 
         ret = nvm_dma ((void *)(dma->virt_addr +
                                 nvm_cmd->sec_sz * c), prp, dma_sz, direction);

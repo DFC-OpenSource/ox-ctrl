@@ -132,6 +132,7 @@ struct nvm_mmgr_io_cmd {
     uint16_t                n_sectors;
     uint32_t                sec_sz;
     uint32_t                md_sz;
+    uint16_t                sec_offset; /* first sector in the ppa vector */
     atomic_t                *sync_count;
     pthread_mutex_t         *sync_mutex;
     struct timeval          tstart;
@@ -156,9 +157,6 @@ struct nvm_io_cmd {
     uint32_t                    n_sec;
     uint64_t                    slba;
     uint8_t                     cmdtype;
-    /* if the plane_page is not full, sec_offset means the number sectors
-     *                                                      to be transfered */
-    uint16_t                    sec_offset;
 };
 
 #include "nvme.h"
