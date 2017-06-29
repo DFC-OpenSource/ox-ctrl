@@ -7,7 +7,7 @@
 #define NAND_PAGE_COUNT         512
 #define NAND_SECTOR_COUNT       4
 #define NAND_SECTOR_SIZE	0x1000
-#define NAND_OOB_SIZE		0x0400
+#define NAND_OOB_SIZE		0x40
 
 /* We assume LUNs * TARGETs for total of LUNs */
 #define NAND_VIRTUAL_LUNS       4

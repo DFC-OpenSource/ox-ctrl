@@ -115,9 +115,10 @@ static int dfcnand_get_next_prp(io_cmd *cmd){
 
 static int dfcnand_dma_helper (io_cmd *cmd)
 {
-    uint32_t dma_sz;
+    uint32_t dma_sz, sec_map = 0, i;
     uint64_t prp;
     uint8_t direction;
+    uint8_t *oob_addr;
     int dma_sec, c = 0, ret = 0;
     struct nvm_mmgr_io_cmd *nvm_cmd =
                            (struct nvm_mmgr_io_cmd *) cmd->dfc_io.nvm_mmgr_io;
@@ -135,10 +136,26 @@ static int dfcnand_dma_helper (io_cmd *cmd)
             return -1;
     }
 
+    oob_addr = cmd->dfc_io.virt_addr + nvm_cmd->sec_sz * nvm_cmd->n_sectors;
     dma_sec = nvm_cmd->n_sectors + 1;
+
     for (; c < dma_sec; c++) {
         dma_sz = (c == dma_sec - 1) ? nvm_cmd->md_sz : nvm_cmd->sec_sz;
         prp = (c == dma_sec - 1) ? nvm_cmd->md_prp : nvm_cmd->prp[c];
+
+        if (!prp) {
+            sec_map |= 1 << c;
+            continue;
+        }
+
+        /* Fix metadata per sector in case of reading single sector */
+        if (sec_map && nvm_cmd->cmdtype == MMGR_READ_PG &&
+                                            nvm_cmd->md_sz && c == dma_sec - 1)
+            for (i = 0; i < nvm_cmd->n_sectors - 1; i++)
+                if (sec_map & 1 << i)
+                    memcpy (oob_addr + LNVM_SEC_OOBSZ * i,
+                            oob_addr + LNVM_SEC_OOBSZ * (i + 1),
+                            LNVM_SEC_OOBSZ * (nvm_cmd->n_sectors - i - 1));
 
         ret = nvm_dma ((void *)(cmd->dfc_io.virt_addr +
                                 nvm_cmd->sec_sz * c), prp, dma_sz, direction);
@@ -294,11 +311,14 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     /* Synchronous commands must DMA to LS2 memory, otherwise, DMA to x86 */
     for (c = 0; c < 5; c++) {
-        prp_sec           = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
-        cmd->len[c]       = (c == 4) ? cmd_nvm->md_sz : sec_sz;
+        prp_sec = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
+
+        cmd->len[c] = (!prp_sec) ? 0 : (c == 4) ? cmd_nvm->md_sz : sec_sz;
+
         cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
             (uint64_t) phy_addr[prp_map] + sec_sz * c :
-            (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
+            (!prp_sec) ?
+                0 : (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
 
         if ((core.run_flag & RUN_TESTS))
             continue;
