@@ -154,7 +154,7 @@ static int lnvm_io_rsv_blk (struct nvm_channel *ch, uint8_t cmdtype,
     return ret;
 }
 
-static int lnvm_count_bb (struct lnvm_channel *lch)
+static uint16_t lnvm_count_bb (struct lnvm_channel *lch)
 {
     int i, bb = 0;
 
@@ -173,8 +173,8 @@ int lnvm_flush_bbt (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
     uint8_t n_pl = ch->geometry->n_of_planes;
     uint32_t pg_sz = ch->geometry->pg_size;
     uint8_t *buf;
-    uint16_t buf_sz = pg_sz + ch->geometry->sec_oob_sz
-                                                    * ch->geometry->sec_per_pg;
+    uint32_t meta_sz = ch->geometry->sec_oob_sz * ch->geometry->sec_per_pg;
+    uint32_t buf_sz = pg_sz + meta_sz;
     void *buf_vec[n_pl];
 
     if (bbt->bb_sz > pg_sz) {
@@ -195,7 +195,7 @@ int lnvm_flush_bbt (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
         memset (buf, 0, buf_sz * n_pl);
         ret = lnvm_io_rsv_blk (ch, MMGR_READ_PG, buf_vec, pg);
 
-        /* get info from OOB area */
+        /* get info from OOB area (64 bytes) in plane 0 */
         memcpy(&nvm_bbt, buf + pg_sz, sizeof(struct lnvm_bbtbl));
 
         if (ret || nvm_bbt.magic != FTL_LNVM_MAGIC)
@@ -283,10 +283,10 @@ int lnvm_get_bbt_nvm (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
     struct nvm_channel *ch = lch->ch;
     uint8_t n_pl = ch->geometry->n_of_planes;
     uint32_t pg_sz = ch->geometry->pg_size;
-    void *buf_vec[n_pl];
-    void *buf;
-    uint16_t buf_sz = pg_sz + ch->geometry->sec_oob_sz
-                                                    * ch->geometry->sec_per_pg;
+    uint8_t *buf_vec[n_pl];
+    uint8_t *buf;
+    uint32_t meta_sz = ch->geometry->sec_oob_sz * ch->geometry->sec_per_pg;
+    uint32_t buf_sz = pg_sz + meta_sz;
 
     if (bbt->bb_sz > pg_sz) {
         log_err("[lnvm ERR: Ch %d -> Maximum Bad block Table size: %d blocks\n",
@@ -306,8 +306,8 @@ int lnvm_get_bbt_nvm (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
         memset (buf, 0, buf_sz * n_pl);
         ret = lnvm_io_rsv_blk (ch, MMGR_READ_PG, buf_vec, pg);
 
-        /* get info from OOB area */
-        memcpy(&nvm_bbt, buf + pg_sz,sizeof(struct lnvm_bbtbl));
+        /* get info from OOB area (64 bytes) in plane 0 */
+        memcpy(&nvm_bbt, buf + pg_sz, sizeof(struct lnvm_bbtbl));
 
         if (ret || nvm_bbt.magic != FTL_LNVM_MAGIC)
             break;

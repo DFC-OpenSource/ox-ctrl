@@ -62,7 +62,7 @@
 
 /* All media managers must accept page r/w of NVM_PG_SIZE + OOB_SIZE*/
 #define NVM_PG_SIZE            0x4000
-#define NVM_OOB_BITS           10
+#define NVM_OOB_BITS           6
 #define NVM_OOB_SIZE           (1 << NVM_OOB_BITS)
 
 #define AND64                  0xffffffffffffffff

@@ -79,7 +79,6 @@ void lnvm_set_default(LnvmCtrl *ctrl)
     ctrl->params.num_ch = LNVM_CH;
     ctrl->params.num_lun = LNVM_LUN_CH;
     ctrl->params.num_pln = LNVM_PLANES;
-    ctrl->params.num_blk = LNVM_BLK_LUN;
     ctrl->bb_gen_freq = LNVM_BB_GEN_FREQ;
     ctrl->err_write = LNVM_ERR_WRITE;
 }
@@ -234,7 +233,7 @@ out:
 uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
-    int i;
+    uint8_t i;
     LnvmRwCmd *dm = (LnvmRwCmd *)cmd;
     uint64_t spba = dm->spba;
     uint32_t nlb = dm->nlb + 1;
@@ -443,12 +442,12 @@ void lnvm_init_id_ctrl(LnvmIdCtrl *ln_id)
     ln_id->cap = LNVM_CAP;
     ln_id->dom = LNVM_DOM;
 
-    ppaf->sect_len    = log2 (LNVM_SEC_PG);
-    ppaf->pln_len     = log2 (LNVM_PLANES);
-    ppaf->ch_len      = log2 (LNVM_CH);
-    ppaf->lun_len     = log2 (LNVM_LUN_CH);
-    ppaf->pg_len      = log2 (LNVM_PG_BLK);
-    ppaf->blk_len     = log2 (LNVM_BLK_LUN);
+    ppaf->sect_len    = (uint8_t) log2 (LNVM_SEC_PG);
+    ppaf->pln_len     = (uint8_t) log2 (LNVM_PLANES);
+    ppaf->ch_len      = (uint8_t) log2 (LNVM_CH);
+    ppaf->lun_len     = (uint8_t) log2 (LNVM_LUN_CH);
+    ppaf->pg_len      = (uint8_t) log2 (LNVM_PG_BLK);
+    ppaf->blk_len     = (uint8_t) log2 (LNVM_BLK_LUN);
 
     ppaf->sect_offset  = 0;
     ppaf->pln_offset  += ppaf->sect_len;
@@ -507,7 +506,7 @@ int lnvm_init(NvmeCtrl *n)
         c->num_ch = ln->params.num_ch;
         c->num_lun = ln->params.num_lun;
         c->num_pln = ln->params.num_pln;
-        c->num_blk = ln->params.num_blk;
+        c->num_blk = (LNVM_BLK_LUN & 0xffff);
         c->num_pg = ln->params.pgs_per_blk;
         c->csecs = ln->params.sec_size;
         c->fpg_sz = ln->params.sec_size * ln->params.secs_per_pg;
