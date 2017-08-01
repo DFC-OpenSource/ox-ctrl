@@ -17,7 +17,7 @@ WRITE: ~298 MB/s
 The FPGA 03.01.00 provides a throughtput of 400 MB/s READ and 300 MB/s WRITE. There is
 a small overhead for reads. We intend to fix it for the next release.
 ```
-![OX Controller bandwidth](https://i.imgsafe.org/9dcabe74c2.png)
+![OX Controller bandwidth](https://itu.dk/research/dfc-data/images/ox-performance.png)
 
 Under ./bin you can find OX already compiled:
 ```
