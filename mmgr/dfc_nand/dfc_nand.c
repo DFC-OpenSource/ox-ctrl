@@ -120,9 +120,6 @@ static void dfcnand_oob_reorder (uint8_t *oob, uint32_t map)
     uint8_t oob_off = 0;
     uint32_t meta_sz = LNVM_SEC_OOBSZ * NAND_SECTOR_COUNT;
 
-    uint8_t oob_test[meta_sz];
-    memcpy (oob, &oob_test, meta_sz);
-
     for (i = 0; i < NAND_SECTOR_COUNT - 1; i++)
         if (map & (1 << i))
             memcpy (oob + oob_off,

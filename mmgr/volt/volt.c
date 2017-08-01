@@ -296,14 +296,11 @@ FREE:
 }
 
 /* Reorder the OOB data in case of single sector read */
-static void dfcnand_oob_reorder (uint8_t *oob, uint32_t map)
+static void volt_oob_reorder (uint8_t *oob, uint32_t map)
 {
     int i;
     uint8_t oob_off = 0;
     uint32_t meta_sz = LNVM_SEC_OOBSZ * VOLT_SECTOR_COUNT;
-
-    uint8_t oob_test[meta_sz];
-    memcpy (oob, &oob_test, meta_sz);
 
     for (i = 0; i < VOLT_SECTOR_COUNT - 1; i++)
         if (map & (1 << i))
@@ -350,7 +347,7 @@ static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
         /* Fix metadata per sector in case of reading single sector */
         if (sec_map && nvm_cmd->cmdtype == MMGR_READ_PG &&
                                             nvm_cmd->md_sz && c == dma_sec - 1)
-            dfcnand_oob_reorder (oob_addr, sec_map);
+            volt_oob_reorder (oob_addr, sec_map);
 
         ret = nvm_dma ((void *)(dma->virt_addr +
                                 nvm_cmd->sec_sz * c), prp, dma_sz, direction);
