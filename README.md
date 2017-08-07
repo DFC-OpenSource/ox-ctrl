@@ -1,5 +1,12 @@
 # OX: A DFC-based Open-Channel SSD Controller
 
+```
+OX 1.4 is coming soon. The main feature is supporting pblk target (host FTL) by enabling 
+sector-granularity reads. It will allow file systems on top of the DFC namespace. The 
+pre-release code is already available under 'for-next' branch. OX 1.4 will be released
+for the linux kernel 4.13.
+```
+
 OX is a controller solution for programmable devices like the DFC (https://github.com/DFC-OpenSource/). OX exposes the
 device as a LightNVM compatible Open-Channel SSD. OX has been developed for potentially support different FTL responsabilities (e.g. write buffering, ECC) or a full-fledged FTL. FTLs are registered within the OX core, enabling applications to select channels to be managed by a specific FTL. The LightNVM FTL, already in OX, parses LightNVM (http://lightnvm.io/) commands and lets the DFC being managed by the host. e.g. The Linux kernel and user-space applications are able to see, manage and isolate the SSD geometry (channels, LUNs, blocks and pages).
 
@@ -14,8 +21,7 @@ Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctr
 READ : ~385 MB/s
 WRITE: ~298 MB/s
 
-The FPGA 03.01.00 provides a throughtput of 400 MB/s READ and 300 MB/s WRITE. There is
-a small overhead for reads. We intend to fix it for the next release.
+The FPGA 03.01.00 provides a maximum throughtput of 400 MB/s READ and 300 MB/s WRITE.
 ```
 ![OX Controller bandwidth](https://itu.dk/research/dfc-data/images/ox-performance.png)
 
