@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #include "include/ssd.h"
@@ -185,8 +186,25 @@ void remove_trailing_whitespace (char *line)
         *(end + 1) = 0; // New end of string
 }
 
+static void sigint_handler (int handle)
+{
+        // Ignore for now, cancel running commands in the future
+}
+
 void cmdline_start (void)
 {
+        struct sigaction new_sa;
+        struct sigaction old_sa;
+        sigfillset(&new_sa.sa_mask);
+        new_sa.sa_handler = SIG_IGN;
+        new_sa.sa_flags = 0;
+
+        if (sigaction(SIGINT, &new_sa, &old_sa) == 0
+            && old_sa.sa_handler != SIG_IGN) {
+                new_sa.sa_handler = sigint_handler;
+                sigaction(SIGINT, &new_sa, 0);
+        }
+
         rl_attempted_completion_function = command_completion;
 
         while (!core.nvm_nvme_ctrl->running) {

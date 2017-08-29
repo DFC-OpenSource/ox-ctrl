@@ -44,6 +44,8 @@ int cmdline_set_debug (char *line, ox_cmd *cmd);
 int cmdline_show_debug (char *line, ox_cmd *cmd);
 int cmdline_exit (char *line, ox_cmd *cmd);
 
+void cmdline_start (void);
+
 char **command_completion (const char *text, int start, int end);
 char *command_generator (const char *text, int state);
 void find_command (char *line, ox_cmd **p_cmd, ox_cmd *p_cmd_list[]);
