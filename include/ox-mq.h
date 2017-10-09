@@ -106,6 +106,7 @@ struct ox_mq_queue {
 #define OX_MQ_TO_COMPLETE   (1 << 0) /* Complete request after timeout */
 
 struct ox_mq_config {
+    char                name[40];
     uint32_t            n_queues;
     uint32_t            q_size;
     ox_mq_sq_fn         *sq_fn;  /* submission queue consumer */
@@ -116,6 +117,7 @@ struct ox_mq_config {
 };
 
 struct ox_mq {
+    LIST_ENTRY(ox_mq)                 entry;
     struct ox_mq_queue                *queues;
     struct ox_mq_config               *config;
     pthread_t                         to_tid;       /* timeout thread */
@@ -127,6 +129,8 @@ struct ox_mq *ox_mq_init (struct ox_mq_config *);
 void          ox_mq_destroy (struct ox_mq *);
 int           ox_mq_submit_req (struct ox_mq *, uint32_t, void *);
 int           ox_mq_complete_req (struct ox_mq *, struct ox_mq_entry *);
-void          ox_mq_show_stats (struct ox_mq *);
+void          ox_mq_show_mq (struct ox_mq *);
+void          ox_mq_show_all (void);
+struct ox_mq *ox_mq_get (const char *);
 
 #endif /* OX_MQ_H */

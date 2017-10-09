@@ -231,6 +231,8 @@ static int dfcnand_start_mq (void)
     struct ox_mq_config mq_config;
 
     /* Start NAND multi-queue */
+
+    sprintf(mq_config.name, "%s", "DFCNAND_MMGR");
     mq_config.n_queues = dfcnand.geometry->n_of_ch;
     mq_config.q_size = 64;
     mq_config.sq_fn = dfcnand_process_sq;

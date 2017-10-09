@@ -215,6 +215,7 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
         return EMAX_NAME_SIZE;
 
     /* Start FTL multi-queue */
+    sprintf(mq_config.name, "%s", ftl->name);
     mq_config.n_queues = ftl->nq;
     mq_config.q_size = NVM_FTL_QUEUE_SIZE;
     mq_config.sq_fn = nvm_ftl_process_sq;

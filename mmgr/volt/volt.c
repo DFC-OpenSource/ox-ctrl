@@ -721,6 +721,7 @@ static int volt_init(void)
         goto OUT;
     }
 
+    sprintf(volt_mq.name, "%s", "VOLT_MMGR");
     volt->mq = ox_mq_init(&volt_mq);
     if (!volt->mq) {
         volt_clean_mem();
