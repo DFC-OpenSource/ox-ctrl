@@ -3,8 +3,8 @@
 NAME = ox-ctrl       # DFC with DFCNAND
 NAMET = ox-ctrl-test # DFC with DFCNAND + tests
 NAMEV = ox-ctrl-volt # DFC with VOLT + tests
-CORE = core.o ox-mq.o nvme.o nvme_cmd.o lightnvm.o cmd_args.o
-CORE_VOLT = core-v.o ox-mq-v.o nvme-v.o nvme_cmd-v.o lightnvm-v.o cmd_args-v.o
+CORE = core.o ox-mq.o nvme.o nvme_cmd.o lightnvm.o cmd_args.o ox_cmdline.o
+CORE_VOLT = core-v.o ox-mq-v.o nvme-v.o nvme_cmd-v.o lightnvm-v.o cmd_args-v.o ox_cmdline-v.o
 CLEAN = *.o *-v.o
 
 ### CONFIGURATION MACROS
@@ -15,7 +15,7 @@ CONFIG_FTL = -DCONFIG_FTL_LNVM
 CONFIG_DFC  = -DCONFIG_MMGR_DFCNAND	    # (1)
 CONFIG_DFC += $(CONFIG_FTL)		    # (1)
 CONFIG_DFC += -DCONFIG_LNVM_SECSZ=0x1000    # (2)
-CONFIG_DFC += -DCONFIG_LNVM_SEC_OOBSZ=0x100 # (2)
+CONFIG_DFC += -DCONFIG_LNVM_SEC_OOBSZ=0x10  # (2)
 CONFIG_DFC += -DCONFIG_LNVM_SEC_PG=4	    # (2)
 CONFIG_DFC += -DCONFIG_LNVM_PG_BLK=512	    # (2)
 CONFIG_DFC += -DCONFIG_LNVM_CH=8	    # (2)
@@ -26,7 +26,7 @@ CONFIG_DFC += -DCONFIG_LNVM_PLANES=2	    # (2)
 CONFIG_VOLT  = -DCONFIG_MMGR_VOLT		# (1)
 CONFIG_VOLT += $(CONFIG_FTL)			# (1)
 CONFIG_VOLT += -DCONFIG_LNVM_SECSZ=0x1000	# (2)
-CONFIG_VOLT += -DCONFIG_LNVM_SEC_OOBSZ=0x100	# (2)
+CONFIG_VOLT += -DCONFIG_LNVM_SEC_OOBSZ=0x10	# (2)
 CONFIG_VOLT += -DCONFIG_LNVM_SEC_PG=4		# (2)
 CONFIG_VOLT += -DCONFIG_LNVM_PG_BLK=64		# (2)
 CONFIG_VOLT += -DCONFIG_LNVM_CH=8		# (2)
@@ -103,13 +103,13 @@ $(TESTS_DFC_PATH)/%.o : %.c include/tests.h
 all: dfc dfc-tests dfc-volt
 
 dfc: $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC)
-	$(CC) $(CFLAGS) $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC) -o $(NAME) -lpthread
+	$(CC) $(CFLAGS) $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC) -o $(NAME) -lpthread -lreadline
 
 dfc-tests: $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC)
-	$(CC) $(CFLAGS) $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC) -o $(NAMET) -lpthread
+	$(CC) $(CFLAGS) $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC) -o $(NAMET) -lpthread -lreadline
 
 dfc-volt: $(CORE_VOLT) $(MMGRS_VOLT) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC)
-	$(CC) $(CFLAGS) $(CORE_VOLT) $(MMGRS_VOLT) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC) -o $(NAMEV) -lpthread
+	$(CC) $(CFLAGS) $(CORE_VOLT) $(MMGRS_VOLT) $(FTLS_DFC) $(PCIE_DFC) $(TESTS_DFC) -o $(NAMEV) -lpthread -lreadline
 
 clean:
 	rm -f $(CLEAN) $(NAME) $(NAMET) $(NAMEV)

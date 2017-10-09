@@ -36,6 +36,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <errno.h>
+#include <math.h>
 #include "include/ssd.h"
 
 #if LIGHTNVM
@@ -43,7 +44,6 @@
 #include "include/uatomic.h"
 
 extern struct core_struct core;
-uint16_t blk;
 
 uint8_t lnvm_dev(NvmeCtrl *n)
 {
@@ -57,13 +57,11 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
     printf(" Number of sectors: %d\n", size);
     printf(" DMA size: %lu (data) + %lu (meta) = %lu bytes\n",
                                                  dt_sz, md_sz, dt_sz + md_sz);
-    for (i = 0; i < size; i++) {
-        printf (" [ppa(%d): ch: %d, lun: %d, blk: %d, pl: %d, pg: %d, "
-                "sec: %d]\n", i, list[i].g.ch, list[i].g.lun, list[i].g.blk,
-                list[i].g.pl, list[i].g.pg, list[i].g.sec);
-    }
     for (i = 0; i < size; i++)
-        printf (" [prp(%d): 0x%016lx\n", i, prp[i]);
+        printf (" [ppa(%d): ch: %d, lun: %d, blk: %d, pl: %d, pg: %d, "
+                                "sec: %d] prp: 0x%016lx\n", i, list[i].g.ch,
+                                list[i].g.lun, list[i].g.blk, list[i].g.pl,
+                                list[i].g.pg, list[i].g.sec, prp[i]);
     printf (" [meta_prp(0): 0x%016lx\n", md_prp[0]);
 }
 
@@ -81,7 +79,6 @@ void lnvm_set_default(LnvmCtrl *ctrl)
     ctrl->params.num_ch = LNVM_CH;
     ctrl->params.num_lun = LNVM_LUN_CH;
     ctrl->params.num_pln = LNVM_PLANES;
-    /*ctrl->params.num_blk*/blk = LNVM_BLK_LUN;
     ctrl->bb_gen_freq = LNVM_BB_GEN_FREQ;
     ctrl->err_write = LNVM_ERR_WRITE;
 }
@@ -236,7 +233,7 @@ out:
 uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     NvmeRequest *req)
 {
-    int i;
+    uint8_t i;
     LnvmRwCmd *dm = (LnvmRwCmd *)cmd;
     uint64_t spba = dm->spba;
     uint32_t nlb = dm->nlb + 1;
@@ -255,6 +252,15 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
         psl[0].ppa = spba;
     }
 
+    /* In case of single PPA, we make the vector for multiple planes */
+    if (nlb < LNVM_PLANES) {
+        nlb = LNVM_PLANES;
+        for (i = 1; i < nlb; i++) {
+            psl[i].ppa = psl[0].ppa;
+            psl[i].g.pl = i;
+        }
+    }
+
     req->meta_size = 0;
     req->status = NVME_SUCCESS;
     req->nlb = nlb;
@@ -264,7 +270,6 @@ uint16_t lnvm_erase_sync(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     req->nvm_io.cmdtype = MMGR_ERASE_BLK;
     req->nvm_io.n_sec = nlb;
     req->nvm_io.req = (void *) req;
-    req->nvm_io.sec_offset = 0;
     req->nvm_io.status.pg_errors = 0;
     req->nvm_io.status.ret_t = 0;
     req->nvm_io.status.pgs_p = 0;
@@ -309,30 +314,24 @@ static inline uint64_t nvme_gen_to_dev_addr(LnvmCtrl *ln,struct nvm_ppa_addr *r)
 
 uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
 {
+    int i, pg, nsec;
+    uint64_t sppa, eppa, moff;
+
     LnvmCtrl *ln = &n->lightnvm_ctrl;
     LnvmRwCmd *lrw = (LnvmRwCmd *)cmd;
-    int i;
-
-    uint64_t sppa, eppa, sec_offset;
-    uint32_t nlb  = lrw->nlb + 1;
-    uint64_t prp1 = lrw->prp1;
-    uint64_t prp2 = lrw->prp2;
-    uint64_t spba = lrw->spba;
-    uint64_t meta = lrw->metadata;
     struct nvm_ppa_addr *psl = req->nvm_io.ppalist;
 
-    const uint8_t lba_index = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
-    const uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
-    const uint16_t oob = ns->id_ns.lbaf[lba_index].ms;
+    uint32_t nlb  = lrw->nlb + 1;
+    uint64_t spba = lrw->spba;
+    uint64_t meta = lrw->metadata;
+
+    uint8_t lba_index = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
+    uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
+    uint16_t oob = ns->id_ns.lbaf[lba_index].ms;
     uint64_t data_size = nlb << data_shift;
     uint32_t n_sectors = data_size / LNVM_SECSZ;
-    uint32_t n_pages = data_size / LNVM_PG_SIZE;
 
-    uint64_t meta_size = (LNVM_SEC_OOBSZ * n_sectors > oob) ?
-             (n_pages < 1) ? oob : nlb * oob :
-             (n_pages < 1) ? LNVM_SEC_OOBSZ * n_sectors : nlb * LNVM_SEC_OOBSZ;
-
-    sec_offset = (data_size % LNVM_PG_SIZE) / (1 << data_shift);
+    uint64_t meta_size = oob * nlb;
 
     uint16_t is_write = (lrw->opcode == LNVM_CMD_PHYS_WRITE ||
                                           lrw->opcode == LNVM_CMD_HYBRID_WRITE);
@@ -341,17 +340,11 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
 
         log_info( "[ERROR lnvm: npages too large (%u). "
                 "Max:%u supported]\n", n_sectors, ln->params.max_sec_per_rq);
-        nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
-                offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
         return NVME_INVALID_FIELD | NVME_DNR;
 
     } else if (n_sectors > 1) {
-
-        if (spba == LNVM_PBA_UNMAPPED || !spba) {
-            nvme_set_error_page(n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
-                    offsetof(LnvmRwCmd, spba), lrw->slba + nlb, ns->id);
+        if (spba == LNVM_PBA_UNMAPPED || !spba)
             return NVME_INVALID_FIELD | NVME_DNR;
-        }
 
         nvme_read_from_host((void *)psl, spba, n_sectors * sizeof(uint64_t));
     } else {
@@ -365,15 +358,13 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     if (n_sectors > 1)
         eppa = nvme_gen_to_dev_addr(ln, &psl[n_sectors - 1]);
 
-    req->nvm_io.prp[0] = prp1;
+    req->nvm_io.prp[0] = lrw->prp1;
 
-    if (n_sectors == 2) {
-        req->nvm_io.prp[1] = prp2;
-    }
-
-    if (n_sectors > 2)
-        nvme_read_from_host((void *)(&req->nvm_io.prp[1]), prp2, (n_sectors-1)
-                                                        * sizeof(uint64_t));
+    if (n_sectors == 2)
+        req->nvm_io.prp[1] = lrw->prp2;
+    else if (n_sectors > 2)
+        nvme_read_from_host((void *)(&req->nvm_io.prp[1]), lrw->prp2,
+                                             (n_sectors-1) * sizeof(uint64_t));
 
     meta_size = (meta) ? meta_size : 0;
     req->slba = sppa;
@@ -388,36 +379,49 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
     req->nvm_io.cmdtype = (req->is_write) ? MMGR_WRITE_PG : MMGR_READ_PG;
     req->nvm_io.n_sec = nlb;
     req->nvm_io.req = (void *) req;
-    req->nvm_io.sec_offset = sec_offset; // 4k page inside a plane page
+
     req->nvm_io.status.pg_errors = 0;
     req->nvm_io.status.ret_t = 0;
     req->nvm_io.status.pgs_p = 0;
     req->nvm_io.status.pgs_s = 0;
-    req->nvm_io.status.total_pgs = (sec_offset) ? (nlb / LNVM_SEC_PG) + 1 :
-                                                                      n_pages;
     req->nvm_io.status.status = NVM_IO_NEW;
 
     for (i = 0; i < 8; i++)
         req->nvm_io.status.pg_map[i] = 0;
 
-    for (i = 0; i < req->nvm_io.status.total_pgs; i++) {
-        req->nvm_io.mmgr_io[i].pg_index = i;
-        req->nvm_io.mmgr_io[i].status = NVM_IO_SUCCESS;
-        req->nvm_io.mmgr_io[i].nvm_io = &req->nvm_io;
-        req->nvm_io.mmgr_io[i].pg_sz = LNVM_PG_SIZE;
-        req->nvm_io.mmgr_io[i].sync_count = NULL;
-        req->nvm_io.mmgr_io[i].sync_mutex = NULL;
-        req->nvm_io.md_prp[i] = (meta && meta_size) ?
-                                meta + (LNVM_SEC_OOBSZ * LNVM_SEC_PG * i) : 0;
+    pg = 0;
+    nsec = 0;
+    moff = meta;
+    for (i = 0; i <= nlb; i++) {
+        if ((i == nlb) || (i && (
+                      psl[i].g.ch != psl[i - 1].g.ch ||
+                      psl[i].g.lun != psl[i - 1].g.lun ||
+                      psl[i].g.blk != psl[i - 1].g.blk ||
+                      psl[i].g.pg != psl[i - 1].g.pg ||
+                      psl[i].g.pl != psl[i - 1].g.pl))) {
+
+            req->nvm_io.mmgr_io[pg].pg_index = pg;
+            req->nvm_io.mmgr_io[pg].status = NVM_IO_SUCCESS;
+            req->nvm_io.mmgr_io[pg].nvm_io = &req->nvm_io;
+            req->nvm_io.mmgr_io[pg].pg_sz = nsec * LNVM_SECSZ;
+            req->nvm_io.mmgr_io[pg].n_sectors = nsec;
+            req->nvm_io.mmgr_io[pg].sec_offset = i - nsec;
+            req->nvm_io.mmgr_io[pg].sync_count = NULL;
+            req->nvm_io.mmgr_io[pg].sync_mutex = NULL;
+            req->nvm_io.md_prp[pg] = (meta && meta_size) ? moff : 0;
+
+            pg++;
+            nsec = 0;
+            moff = meta + (oob * i);
+        }
+        nsec++;
     }
+
+    req->nvm_io.status.total_pgs = pg;
 
     if (core.debug)
         lnvm_debug_print_io (req->nvm_io.ppalist, req->nvm_io.prp,
                                 req->nvm_io.md_prp, nlb, data_size, meta_size);
-
-    /* NULL IO */
-    if (core.null)
-        return 0;
 
     return nvm_submit_ftl(&req->nvm_io);
 }
@@ -430,24 +434,27 @@ static int lightnvm_flush_tbls(NvmeCtrl *n)
 
 void lnvm_init_id_ctrl(LnvmIdCtrl *ln_id)
 {
+    struct LnvmIdAddrFormat *ppaf = &ln_id->ppaf;
+
     ln_id->ver_id = LNVM_VER_ID;
     ln_id->vmnt = LNVM_VMNT;
     ln_id->cgrps = LNVM_CGRPS;
     ln_id->cap = LNVM_CAP;
     ln_id->dom = LNVM_DOM;
 
-    ln_id->ppaf.blk_offset = 0;
-    ln_id->ppaf.blk_len = 16;
-    ln_id->ppaf.pg_offset = 16;
-    ln_id->ppaf.pg_len = 16;
-    ln_id->ppaf.sect_offset = 32;
-    ln_id->ppaf.sect_len = 8;
-    ln_id->ppaf.pln_offset = 40;
-    ln_id->ppaf.pln_len = 8;
-    ln_id->ppaf.lun_offset = 48;
-    ln_id->ppaf.lun_len = 8;
-    ln_id->ppaf.ch_offset = 56;
-    ln_id->ppaf.ch_len = 8;
+    ppaf->sect_len    = (uint8_t) log2 (LNVM_SEC_PG);
+    ppaf->pln_len     = (uint8_t) log2 (LNVM_PLANES);
+    ppaf->ch_len      = (uint8_t) log2 (LNVM_CH);
+    ppaf->lun_len     = (uint8_t) log2 (LNVM_LUN_CH);
+    ppaf->pg_len      = (uint8_t) log2 (LNVM_PG_BLK);
+    ppaf->blk_len     = (uint8_t) log2 (LNVM_BLK_LUN);
+
+    ppaf->sect_offset  = 0;
+    ppaf->pln_offset  += ppaf->sect_len;
+    ppaf->ch_offset   += ppaf->pln_offset + ppaf->pln_len;
+    ppaf->lun_offset  += ppaf->ch_offset + ppaf->ch_len;
+    ppaf->pg_offset   += ppaf->lun_offset + ppaf->lun_len;
+    ppaf->blk_offset  += ppaf->pg_offset + ppaf->pg_len;
 }
 
 uint16_t lnvm_identity(NvmeCtrl *n, NvmeCmd *cmd)
@@ -499,7 +506,7 @@ int lnvm_init(NvmeCtrl *n)
         c->num_ch = ln->params.num_ch;
         c->num_lun = ln->params.num_lun;
         c->num_pln = ln->params.num_pln;
-        c->num_blk = blk;//ln->params.num_blk;
+        c->num_blk = (LNVM_BLK_LUN & 0xffff);
         c->num_pg = ln->params.pgs_per_blk;
         c->csecs = ln->params.sec_size;
         c->fpg_sz = ln->params.sec_size * ln->params.secs_per_pg;

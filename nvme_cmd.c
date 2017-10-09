@@ -754,7 +754,7 @@ uint16_t nvme_rw (NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
                                                              NvmeRequest *req)
 {
     NvmeRwCmd *rw = (NvmeRwCmd *)cmd;
-    int off_count, i;
+    int i;
     uint16_t ctrl = rw->control;
     uint32_t nlb  = rw->nlb + 1;
     uint64_t slba = rw->slba;
@@ -807,16 +807,13 @@ uint16_t nvme_rw (NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     req->nlb = nlb;
     req->ns = ns;
     req->lba_index = lba_index;
-    off_count = (aio_slba % (NVME_KERNEL_PG_SIZE/(1<<data_shift)));
 
     req->nvm_io.sec_sz = NVME_KERNEL_PG_SIZE;
-    req->nvm_io.channel = 0; /* */
     req->nvm_io.cmdtype = (req->is_write) ? MMGR_WRITE_PG : MMGR_READ_PG;
     req->nvm_io.n_sec = nlb;
     req->nvm_io.prp[0] = prp1;
     req->nvm_io.req = (void *) req;
     req->nvm_io.slba = aio_slba;
-    req->nvm_io.sec_offset = (off_count * (1<<data_shift));
     req->nvm_io.status.pg_errors = 0;
     req->nvm_io.status.ret_t = 0;
     req->nvm_io.status.total_pgs = 0;

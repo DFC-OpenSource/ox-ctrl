@@ -40,24 +40,45 @@
 #include "include/ox-mq.h"
 #include "include/ssd.h"
 
-void ox_mq_show_stats (struct ox_mq *mq)
+static int mq_count = 0;
+LIST_HEAD(mq_list, ox_mq) mq_head = LIST_HEAD_INITIALIZER(mq_head);
+
+void ox_mq_show_mq (struct ox_mq *mq)
 {
     int i;
     struct ox_mq_queue *q;
 
+    printf ("ox-mq: %s\n", mq->config->name);
     for (i = 0; i < mq->config->n_queues; i++) {
         q = &mq->queues[i];
-        log_info ("Q %d. SF: %d, SU: %d, SW: %d, CF: %d, CU: %d\n", i,
+        printf ("    Q%02d: SF: %d, SU: %d, SW: %d, CF: %d, CU: %d\n", i,
                 atomic_read(&q->stats.sq_free),
                 atomic_read(&q->stats.sq_used),
                 atomic_read(&q->stats.sq_wait),
                 atomic_read(&q->stats.cq_free),
                 atomic_read(&q->stats.cq_used));
     }
-    log_info ("EXT %d, TO: %d, TO_BACK: %d\n",
+    printf ("    EXT%02d: TO: %d, TO_BACK: %d\n",
                 atomic_read(&mq->stats.ext_list),
                 atomic_read(&mq->stats.timeout),
                 atomic_read(&mq->stats.to_back));
+}
+
+void ox_mq_show_all ()
+{
+    struct ox_mq *mq;
+    LIST_FOREACH (mq, &mq_head, entry) {
+        ox_mq_show_mq (mq);
+    }
+}
+
+struct ox_mq *ox_mq_get (const char *name) {
+    struct ox_mq *mq;
+    LIST_FOREACH(mq, &mq_head, entry){
+        if(!strcmp (mq->config->name, name))
+            return mq;
+    }
+    return NULL;
 }
 
 static void ox_mq_init_stats (struct ox_mq_stats *stats)
@@ -321,6 +342,9 @@ static void *ox_mq_cq_thread (void *arg)
         opaque = req->opaque;
         ox_mq_reset_entry (req);
         OX_MQ_ENQUEUE (&q->cq_free, req, &q->cq_free_mutex, &q->stats.cq_free);
+
+        if (!opaque)
+            continue;
 
         q->cq_fn (opaque);
     }
@@ -644,6 +668,12 @@ struct ox_mq *ox_mq_init (struct ox_mq_config *config)
     if (mq->config->to_usec && ox_mq_start_to(mq))
         goto FREE_ALL;
 
+    if (!mq_count)
+        LIST_INIT(&mq_head);
+
+    LIST_INSERT_HEAD(&mq_head, mq, entry);
+    mq_count++;
+
     log_info (" [ox-mq: Multi queue started (nq: %d, qs: %d)]\n",
                                              config->n_queues, config->q_size);
     return mq;
@@ -678,8 +708,13 @@ void ox_mq_destroy (struct ox_mq *mq)
         pthread_join (mq->to_tid, NULL);
         ox_mq_free_ext_list (mq);
     }
+
+    LIST_REMOVE(mq, entry);
+    mq_count--;
+
     free (mq->queues);
     free (mq->config);
     free (mq);
+
     log_info (" [ox-mq: Multi queue stopped]\n");
 }

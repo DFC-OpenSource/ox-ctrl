@@ -165,7 +165,7 @@ static void volt_free_dma_buf (void)
         volt_free (dma_buf[slots], VOLT_PAGE_SIZE + VOLT_SECTOR_SIZE);
 
     volt_free (dma_buf, sizeof (void *) * VOLT_DMA_SLOT_INDEX);
-    volt_free (volt->edma, VOLT_PAGE_SIZE + VOLT_OOB_SIZE);
+    volt_free (volt->edma, VOLT_PAGE_SIZE + VOLT_SECTOR_SIZE);
 }
 
 static void volt_clean_mem(void)
@@ -244,7 +244,8 @@ static int volt_init_luns(void)
         return VOLT_MEM_ERROR;
 
     for (i_lun = 0; i_lun < total_luns; i_lun++)
-        volt->luns[i_lun].blk_offset = &volt->blocks[i_lun * geo->blk_per_lun];
+        volt->luns[i_lun].blk_offset =
+                    &volt->blocks[i_lun * geo->blk_per_lun * geo->n_of_planes];
 
     return VOLT_MEM_OK;
 }
@@ -268,7 +269,7 @@ static int volt_init_dma_buf (void)
 {
     int slots = 0, slots_i;
 
-    volt->edma = volt_alloc(VOLT_PAGE_SIZE + VOLT_OOB_SIZE);
+    volt->edma = volt_alloc(VOLT_PAGE_SIZE + VOLT_SECTOR_SIZE);
     if (!volt->edma)
         return -1;
 
@@ -290,16 +291,32 @@ FREE_SLOTS:
             volt_free (dma_buf[slots_i], VOLT_PAGE_SIZE + VOLT_SECTOR_SIZE);
         volt_free (dma_buf, sizeof (void *) * VOLT_DMA_SLOT_INDEX);
 FREE:
-    volt_free (volt->edma, VOLT_PAGE_SIZE + VOLT_OOB_SIZE);
+    volt_free (volt->edma, VOLT_PAGE_SIZE + VOLT_SECTOR_SIZE);
     return -1;
+}
+
+/* Reorder the OOB data in case of single sector read */
+static void volt_oob_reorder (uint8_t *oob, uint32_t map)
+{
+    int i;
+    uint8_t oob_off = 0;
+    uint32_t meta_sz = LNVM_SEC_OOBSZ * VOLT_SECTOR_COUNT;
+
+    for (i = 0; i < VOLT_SECTOR_COUNT - 1; i++)
+        if (map & (1 << i))
+            memcpy (oob + oob_off,
+                    oob + oob_off + LNVM_SEC_OOBSZ,
+                    meta_sz - oob_off - LNVM_SEC_OOBSZ);
+        else
+            oob_off += LNVM_SEC_OOBSZ;
 }
 
 static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
 {
-    uint32_t dma_sz;
-    int dma_sec, c = 0, ret = 0;
+    uint32_t dma_sz, sec_map = 0, dma_sec, c = 0, ret = 0;
     uint64_t prp;
     uint8_t direction;
+    uint8_t *oob_addr;
     struct volt_dma *dma = (struct volt_dma *) nvm_cmd->rsvd;
 
     switch (nvm_cmd->cmdtype) {
@@ -315,10 +332,22 @@ static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
             return -1;
     }
 
+    oob_addr = dma->virt_addr + nvm_cmd->sec_sz * nvm_cmd->n_sectors;
     dma_sec = nvm_cmd->n_sectors + 1;
+
     for (; c < dma_sec; c++) {
         dma_sz = (c == dma_sec - 1) ? nvm_cmd->md_sz : nvm_cmd->sec_sz;
         prp = (c == dma_sec - 1) ? nvm_cmd->md_prp : nvm_cmd->prp[c];
+
+        if (!prp) {
+            sec_map |= 1 << c;
+            continue;
+        }
+
+        /* Fix metadata per sector in case of reading single sector */
+        if (sec_map && nvm_cmd->cmdtype == MMGR_READ_PG &&
+                                            nvm_cmd->md_sz && c == dma_sec - 1)
+            volt_oob_reorder (oob_addr, sec_map);
 
         ret = nvm_dma ((void *)(dma->virt_addr +
                                 nvm_cmd->sec_sz * c), prp, dma_sz, direction);
@@ -474,7 +503,7 @@ static int volt_prepare_rw (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     memset(dma, 0, sizeof(struct volt_dma));
 
-    uint64_t prp_map = volt_get_next_prp(dma, cmd_nvm->ppa.g.ch);
+    uint32_t prp_map = volt_get_next_prp(dma, cmd_nvm->ppa.g.ch);
 
     dma->virt_addr = dma_buf[(cmd_nvm->ppa.g.ch * VOLT_DMA_SLOT_CH) + prp_map];
 
@@ -692,6 +721,7 @@ static int volt_init(void)
         goto OUT;
     }
 
+    sprintf(volt_mq.name, "%s", "VOLT_MMGR");
     volt->mq = ox_mq_init(&volt_mq);
     if (!volt->mq) {
         volt_clean_mem();

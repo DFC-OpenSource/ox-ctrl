@@ -122,7 +122,6 @@ typedef struct LnvmParams {
     uint8_t     num_ch;
     uint8_t     num_pln;
     uint8_t     num_lun;
-    //uint16_t    num_blk;
     /* calculated values */
     uint32_t    sec_per_phys_pl;
     uint32_t    sec_per_log_pl;

@@ -113,12 +113,28 @@ static int dfcnand_get_next_prp(io_cmd *cmd){
     } while (1);
 }
 
+/* Reorder the OOB data in case of single sector read */
+static void dfcnand_oob_reorder (uint8_t *oob, uint32_t map)
+{
+    int i;
+    uint8_t oob_off = 0;
+    uint32_t meta_sz = LNVM_SEC_OOBSZ * NAND_SECTOR_COUNT;
+
+    for (i = 0; i < NAND_SECTOR_COUNT - 1; i++)
+        if (map & (1 << i))
+            memcpy (oob + oob_off,
+                    oob + oob_off + LNVM_SEC_OOBSZ,
+                    meta_sz - oob_off - LNVM_SEC_OOBSZ);
+        else
+            oob_off += LNVM_SEC_OOBSZ;
+}
+
 static int dfcnand_dma_helper (io_cmd *cmd)
 {
-    uint32_t dma_sz;
-    uint64_t prp;
+    uint32_t sec_map = 0;
     uint8_t direction;
-    int dma_sec, c = 0, ret = 0;
+    uint8_t *oob_addr;
+    int c = 0, ret = 0;
     struct nvm_mmgr_io_cmd *nvm_cmd =
                            (struct nvm_mmgr_io_cmd *) cmd->dfc_io.nvm_mmgr_io;
 
@@ -135,15 +151,35 @@ static int dfcnand_dma_helper (io_cmd *cmd)
             return -1;
     }
 
-    dma_sec = nvm_cmd->n_sectors + 1;
-    for (; c < dma_sec; c++) {
-        dma_sz = (c == dma_sec - 1) ? nvm_cmd->md_sz : nvm_cmd->sec_sz;
-        prp = (c == dma_sec - 1) ? nvm_cmd->md_prp : nvm_cmd->prp[c];
+    oob_addr = cmd->dfc_io.virt_addr + nvm_cmd->sec_sz * nvm_cmd->n_sectors;
 
-        ret = nvm_dma ((void *)(cmd->dfc_io.virt_addr +
-                                nvm_cmd->sec_sz * c), prp, dma_sz, direction);
+    /* Transfer the data only if required */
+    if (~cmd->dfc_io.local_dma & DFCNAND_LS2_DMA_DATA)
+        goto OOB;
+
+    for (; c < nvm_cmd->n_sectors; c++) {
+
+        if (!nvm_cmd->prp[c]) {
+            sec_map |= 1 << c;
+            continue;
+        }
+
+        ret = nvm_dma ((void *)(cmd->dfc_io.virt_addr + nvm_cmd->sec_sz * c),
+                                  nvm_cmd->prp[c], nvm_cmd->sec_sz, direction);
         if (ret) break;
+
     }
+
+OOB:
+    /* Fix metadata per sector in case of reading single sector */
+    if (nvm_cmd->md_prp && sec_map && nvm_cmd->cmdtype == MMGR_READ_PG)
+        dfcnand_oob_reorder (oob_addr, sec_map);
+
+    /* Transfer the metadata if required */
+    if ((cmd->dfc_io.local_dma & DFCNAND_LS2_DMA_OOB) && nvm_cmd->md_prp)
+        if(nvm_dma ((void *)(oob_addr), nvm_cmd->md_prp,
+                                                    nvm_cmd->md_sz, direction))
+            return -1;
 
     return ret;
 }
@@ -195,6 +231,8 @@ static int dfcnand_start_mq (void)
     struct ox_mq_config mq_config;
 
     /* Start NAND multi-queue */
+
+    sprintf(mq_config.name, "%s", "DFCNAND_MMGR");
     mq_config.n_queues = dfcnand.geometry->n_of_ch;
     mq_config.q_size = 64;
     mq_config.sq_fn = dfcnand_process_sq;
@@ -256,12 +294,13 @@ inline static void dfcnand_ch_traffic_ctrl (struct nvm_mmgr_io_cmd *cmd)
 
 static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
-    int c;
-    uint64_t prp_sec;
-    uint32_t prp_map;
+    uint64_t prp_sec[NAND_SECTOR_COUNT + 1];
+    uint32_t prp_map, sec_map = 0, c;
+    uint32_t scount = NAND_SECTOR_COUNT;
     uint32_t sec_sz = NAND_SECTOR_SIZE;
     uint32_t pg_sz  = NAND_PAGE_SIZE;
     uint32_t oob_sz = NAND_OOB_SIZE;
+    uint8_t dma_flag;
     io_cmd *cmd = (struct io_cmd *) cmd_nvm->rsvd;
 
     /* For now we only accept up to 16K page size and 4K sector size + 1K OOB */
@@ -272,14 +311,6 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
     memset(cmd, 0, sizeof(cmd));
 
     uint16_t phytl = dfcnand_vir_to_phy_lun(cmd_nvm->ppa.g.lun);
-
-    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS)) {
-        prp_map = dfcnand_get_next_prp(cmd);
-        cmd->dfc_io.virt_addr = virt_addr[prp_map];
-        memset(cmd->dfc_io.virt_addr, 0, pg_sz + oob_sz);
-    } else
-        cmd->dfc_io.virt_addr = (uint8_t *)
-                             (core.nvm_pcie->host_io_mem->addr + cmd_nvm->prp);
 
     cmd->dfc_io.nvm_mmgr_io = cmd_nvm;
 
@@ -292,23 +323,49 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     cmd_nvm->n_sectors = cmd_nvm->pg_sz / sec_sz;
 
-    /* Synchronous commands must DMA to LS2 memory, otherwise, DMA to x86 */
+    /* Fills up per sector information */
     for (c = 0; c < 5; c++) {
-        prp_sec           = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
-        cmd->len[c]       = (c == 4) ? cmd_nvm->md_sz : sec_sz;
-        cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
-            (uint64_t) phy_addr[prp_map] + sec_sz * c :
-            (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
+        prp_sec[c] = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
+        cmd->len[c] = (c < 4) ? sec_sz : (!prp_sec[c]) ? 0 : oob_sz;
 
-        if ((core.run_flag & RUN_TESTS))
+        if (c < 4 && !prp_sec[c]) {
+            sec_map |= 1 << c;
+            scount--;
+        }
+    }
+
+    /* Synchronous commands, single sector reads, OOB transfer and local tests
+     *  must DMA to LS2 memory. Sets the local_dma flag */
+    if (sec_map || cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
+        cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_DATA;
+    if (cmd->len[4])
+        cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_OOB;
+
+    /* If DMA is local, sets up the physical memory buffers */
+    if (cmd->dfc_io.local_dma) {
+        prp_map = dfcnand_get_next_prp(cmd);
+        cmd->dfc_io.virt_addr = virt_addr[prp_map];
+        memset(cmd->dfc_io.virt_addr, 0, pg_sz + oob_sz);
+    }
+
+    /* Sets the right buffer addresses */
+    for (c = 0; c < 5; c++) {
+        dma_flag = (c == 4) ? DFCNAND_LS2_DMA_OOB : DFCNAND_LS2_DMA_DATA;
+
+        cmd->host_addr[c] = (cmd->dfc_io.local_dma & dma_flag) ?
+            (uint64_t) phy_addr[prp_map] + sec_sz * c :
+            (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec[c];
+
+        if (cmd->dfc_io.local_dma)
             continue;
 
-        if (!cmd_nvm->sync_count && cmd->host_addr[c] >
-                                        core.nvm_pcie->host_io_mem->paddr +
-                                        core.nvm_pcie->host_io_mem->size)
+        if (cmd->host_addr[c] > core.nvm_pcie->host_io_mem->paddr +
+                                              core.nvm_pcie->host_io_mem->size)
             goto CLEAN;
     }
     cmd->col_addr = 0x0;
+    if (!cmd->len[4])
+        cmd->host_addr[4] = 0x0;
 
     dfcnand_ch_traffic_ctrl(cmd_nvm);
 
@@ -319,7 +376,7 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
 CLEAN:
     log_err("[MMGR Read ERROR: Failed to enqueue command.]\n");
-    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
+    if (cmd->dfc_io.local_dma)
         dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
     cmd_nvm->status = NVM_IO_FAIL;
     return -1;
@@ -362,14 +419,22 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     cmd_nvm->n_sectors = cmd_nvm->pg_sz / sec_sz;
 
+    if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS)) {
+        cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_DATA;
+        if (cmd->len[4])
+            cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_OOB;
+    }
+
     if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
         if (dfcnand_dma_helper (cmd))
             goto CLEAN;
 
     /* Synchronous commands must DMA to LS2 memory, otherwise, DMA to x86 */
+    /* For writes, always 1kb of OOB is transfered when metadata is present */
     for (c = 0; c < 5; c++) {
-        prp_sec           = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
-        cmd->len[c]       = (c == 4) ? cmd_nvm->md_sz : sec_sz;
+        prp_sec     = (c == 4) ? cmd_nvm->md_prp : cmd_nvm->prp[c];
+        cmd->len[c] = (!prp_sec) ? 0 : (c < 4) ? sec_sz : oob_sz;
+
         cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
             (uint64_t) phy_addr[prp_map] + sec_sz * c :
             (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
@@ -647,8 +712,7 @@ static int dfcnand_complete(io_cmd *cmd)
         goto OUT;
 
     if (cmd->status) {
-        if ((nvm_cmd->sync_count || (core.run_flag & RUN_TESTS))
-                                       && cmd->dfc_io.cmd_type == MMGR_READ_PG)
+        if ((cmd->dfc_io.cmd_type == MMGR_READ_PG) && cmd->dfc_io.local_dma)
             ret = dfcnand_dma_helper (cmd);
 
         nvm_cmd->status = (ret) ? NVM_IO_FAIL : NVM_IO_SUCCESS;
@@ -656,9 +720,8 @@ static int dfcnand_complete(io_cmd *cmd)
         nvm_cmd->status = NVM_IO_FAIL;
 
 OUT:
-    if ((nvm_cmd->sync_count || (core.run_flag & RUN_TESTS)) &&
-            (cmd->dfc_io.cmd_type == MMGR_WRITE_PG || cmd->dfc_io.cmd_type ==
-                                                                  MMGR_READ_PG))
+    if (cmd->dfc_io.local_dma && (cmd->dfc_io.cmd_type == MMGR_WRITE_PG ||
+                                         cmd->dfc_io.cmd_type == MMGR_READ_PG))
         dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
 
     nvm_callback(nvm_cmd);
@@ -683,7 +746,7 @@ struct nvm_mmgr_geometry dfcnand_geo = {
     .sec_per_pg     = NAND_SECTOR_COUNT,
     .n_of_planes    = NAND_PLANE_COUNT,
     .pg_size        = NAND_PAGE_SIZE,
-    .sec_oob_sz     = NAND_OOB_SIZE / NAND_SECTOR_COUNT
+    .sec_oob_sz     = NAND_EXPOSED_OOB / NAND_SECTOR_COUNT
 };
 
 int mmgr_dfcnand_init()
