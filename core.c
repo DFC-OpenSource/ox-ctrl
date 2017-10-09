@@ -72,6 +72,7 @@
 #include <sys/time.h>
 #include "include/uatomic.h"
 #include "include/ox-mq.h"
+#include "include/cmdline.h"
 
 LIST_HEAD(mmgr_list, nvm_mmgr) mmgr_head = LIST_HEAD_INITIALIZER(mmgr_head);
 LIST_HEAD(ftl_list, nvm_ftl) ftl_head = LIST_HEAD_INITIALIZER(ftl_head);
@@ -1046,8 +1047,7 @@ int nvm_init_ctrl (int argc, char **argv)
             break;
         case OX_RUN_MODE:
             core.run_flag ^= RUN_TESTS;
-            while(!core.nvm_nvme_ctrl->running)
-                usleep(NVM_SEC);
+            cmdline_start();
             break;
         default:
             goto CLEAN;
