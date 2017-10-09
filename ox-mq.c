@@ -708,12 +708,13 @@ void ox_mq_destroy (struct ox_mq *mq)
         pthread_join (mq->to_tid, NULL);
         ox_mq_free_ext_list (mq);
     }
-    free (mq->queues);
-    free (mq->config);
-    free (mq);
 
     LIST_REMOVE(mq, entry);
     mq_count--;
+
+    free (mq->queues);
+    free (mq->config);
+    free (mq);
 
     log_info (" [ox-mq: Multi queue stopped]\n");
 }
