@@ -47,7 +47,7 @@ ox_cmd debug_cmd[] = {
           "Enables debugging",
           "Enables debugging\n"
           "\n"
-          "    Will enable the display of live debugging information of NVMe commands"
+          "    Will enable the display of live debugging information of NVMe commands."
         },
         { "off",
           NULL,
@@ -56,7 +56,28 @@ ox_cmd debug_cmd[] = {
           "Disables debugging",
           "Disables debugging\n"
           "\n"
-          "    Will disable the display of live debugging information of NVMe commands"
+          "    Will disable the display of live debugging information of NVMe commands."
+        },
+        { NULL, NULL, NULL, NULL, NULL, NULL }
+};
+
+ox_cmd mq_cmd[] = {
+        { "status",
+          NULL,
+          cmdline_show_mq_status,
+          NULL,
+          "Shows the status of all the internal mq queues",
+          "Shows the status of all the internal mq queues\n"
+          "\n"
+          "    Displays run-time status of the internal queue groups of mq. This includes\n"
+          "    their name and status of each queue.\n"
+          "      Key  Description\n"
+          "      Q:   Queue number\n"
+          "      SF:  Submission Free queue  -  Available for new submission entries\n"
+          "      SU:  Submission Used queue  -  Ready to be processed\n"
+          "      SW:  Submission Wait queue  -  In process\n"
+          "      CF:  Completion Free queue  -  Available for new completion entries\n"
+          "      CU:  Completion Used queue  -  Processed, but waiting for completion\n"
         },
         { NULL, NULL, NULL, NULL, NULL, NULL }
 };
@@ -70,14 +91,22 @@ ox_cmd show_cmd[] = {
           "Shows if debugging mode is enabled\n"
           "\n"
           "    Displays if reporting of live debugging information of NVMe commands"
-          "    is enabled"
+          "    is enabled."
+        },
+        { "mq",
+          mq_cmd,
+          NULL,
+          NULL,
+          "Displays run-time information for multi-queue",
+          "Usage: show mq [sub-command]\n"
+          "    Displays run-time information and status information for multi-queue."
         },
         { NULL, NULL, NULL, NULL, NULL, NULL }
 };
 
 ox_cmd main_cmd[] = {
         { "help",
-          &main_cmd[1],
+          &main_cmd[1],  // Skip help in auto-complete
           NULL,
           NULL,
           "Display information about builtin commands.",
@@ -147,6 +176,12 @@ int cmdline_set_debug (char *line, ox_cmd *cmd)
 int cmdline_show_debug (char *line, ox_cmd *cmd)
 {
         printf("OX: debugging is %s\n", core.debug ? "on" : "off");
+        return 0;
+}
+
+int cmdline_show_mq_status (char *line, ox_cmd *cmd)
+{
+        ox_mq_show_all();
         return 0;
 }
 
