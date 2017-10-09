@@ -1,6 +1,6 @@
 /* OX: Open-Channel NVM Express SSD Controller
  *
- *  - DFC NAND Media Manager
+ *  - OX Command line
  *
  * Copyright (C) 2017, IT University of Copenhagen. All rights reserved.
  * Written by Frey Alfredsson <frea@itu.dk>
@@ -66,7 +66,7 @@ ox_cmd show_cmd[] = {
           NULL,
           cmdline_show_debug,
           NULL,
-          "Disables debugging",
+          "Shows if debugging mode is enabled",
           "Shows if debugging mode is enabled\n"
           "\n"
           "    Displays if reporting of live debugging information of NVMe commands"
