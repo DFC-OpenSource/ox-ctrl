@@ -494,56 +494,11 @@ inline uint16_t nvme_get_log(NvmeCtrl *n, NvmeCmd *cmd)
 
 uint16_t nvme_abort_req (NvmeCtrl *n, NvmeCmd *cmd, uint32_t *result)
 {
-    uint32_t index = 0;
-    uint16_t sqid = cmd->cdw10 & 0xffff;
-    uint16_t cid = (cmd->cdw10 >> 16) & 0xffff;
-    NvmeSQ *sq;
-    NvmeRequest *req;
-
-    *result = 1;
-    if (nvme_check_sqid (n, sqid)) {
-	return NVME_SUCCESS;
-    }
-
-    sq = n->sq[sqid];
-    TAILQ_FOREACH (req, &sq->out_req_list, entry) {
-	if (sq->sqid) {
-            if (req->cqe.cid == cid) {
-                *result = 0;
-		return NVME_SUCCESS;
-            }
-	}
-    }
-
-    while ((sq->head + index) % sq->size != sq->tail) {
-        NvmeCmd abort_cmd;
-	uint64_t addr;
-
-	if (sq->phys_contig)
-            addr = sq->dma_addr + ((sq->head + index) % sq->size) * n->sqe_size;
-
-        nvme_addr_read (n, addr, (void *)&abort_cmd, sizeof (abort_cmd));
-	if (abort_cmd.cid == cid) {
-            *result = 0;
-            pthread_mutex_lock(&n->req_mutex);
-            req = (NvmeRequest *)TAILQ_FIRST (&sq->req_list);
-            TAILQ_REMOVE (&sq->req_list, req, entry);
-            TAILQ_INSERT_TAIL (&sq->out_req_list, req, entry);
-            pthread_mutex_unlock(&n->req_mutex);
-
-            memset (&req->cqe, 0, sizeof (req->cqe));
-            req->cqe.cid = cid;
-            req->status = NVME_CMD_ABORT_REQ;
-
-            abort_cmd.opcode = NVME_OP_ABORTED;
-            nvme_addr_write (n, addr, (void *)&abort_cmd, sizeof (abort_cmd));
-
-            nvme_enqueue_req_completion (n->cq[sq->cqid], req);
-            return NVME_SUCCESS;
-	}
-
-	++index;
-    }
+/* The Abort command is used to abort a specific command previously submitted to the Admin Submission
+Queue or an I/O Submission Queue. An Abort command is a best effort command; the command to abort
+may have already completed, currently be in execution, or may be deeply queued. It is implementation
+specific when a controller chooses to complete the Abort command when the command to abort is not
+found. */
     return NVME_SUCCESS;
 }
 
