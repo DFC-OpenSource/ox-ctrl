@@ -802,31 +802,37 @@ OUT:
     return -1;
 }
 
-static int nvm_init ()
+int nvm_init (uint8_t start_all)
 {
     int ret;
-    core.mmgr_count = 0;
-    core.ftl_count = 0;
-    core.ftl_q_count = 0;
-    core.nvm_ch_count = 0;
-    core.run_flag = 0;
 
-    core.nvm_nvme_ctrl = malloc (sizeof (NvmeCtrl));
+    core.ftl_q_count = 0;
+    core.run_flag = 0;
+    core.ftl_count = 0;
+
+    if (start_all) {
+        core.mmgr_count = 0;
+        core.nvm_ch_count = 0;
+        core.nvm_nvme_ctrl = malloc (sizeof (NvmeCtrl));
+    }
+
     if (!core.nvm_nvme_ctrl)
         return EMEM;
     core.nvm_nvme_ctrl->running = 1; /* not ready */
     core.run_flag |= RUN_NVME_ALLOC;
 
     /* media managers */
+    if (start_all) {
 #ifdef CONFIG_MMGR_DFCNAND
-    ret = mmgr_dfcnand_init();
-    if(ret) goto OUT;
+        ret = mmgr_dfcnand_init();
+        if(ret) goto OUT;
 #endif
 #ifdef CONFIG_MMGR_VOLT
-    ret = mmgr_volt_init();
-    if(ret) goto OUT;
+        ret = mmgr_volt_init();
+        if(ret) goto OUT;
 #endif
-    core.run_flag |= RUN_MMGR;
+        core.run_flag |= RUN_MMGR;
+    }
 
     /* flash translation layers */
 #ifdef CONFIG_FTL_LNVM
@@ -841,16 +847,20 @@ static int nvm_init ()
     core.run_flag |= RUN_CH;
 
     /* pci handler */
-    ret = dfcpcie_init();
-    if(ret) goto OUT;
-    core.run_flag |= RUN_PCIE;
+    if (start_all) {
+        ret = dfcpcie_init();
+        if(ret) goto OUT;
+        core.run_flag |= RUN_PCIE;
+    }
 
     /* nvme standard */
     ret = nvme_init(core.nvm_nvme_ctrl);
     if(ret) goto OUT;
     core.run_flag |= RUN_NVME;
-    core.run_flag |= RUN_TESTS;
+
     core.nvm_nvme_ctrl->running = 0; /* ready */
+
+    printf("OX Controller started succesfully. Log: /var/log/nvme.log\n");
 
     return 0;
 
@@ -858,19 +868,19 @@ OUT:
     return ret;
 }
 
-static void nvm_clean_all ()
+void nvm_clear_all (uint8_t stop_all)
 {
     struct nvm_ftl *ftl;
     struct nvm_mmgr *mmgr;
 
     /* Clean PCIe handler */
-    if(core.nvm_pcie && (core.run_flag & RUN_PCIE)) {
+    if(core.nvm_pcie && (core.run_flag & RUN_PCIE) && stop_all) {
         core.nvm_pcie->ops->exit();
         core.run_flag ^= RUN_PCIE;
     }
 
     /* Clean channels */
-    if (core.run_flag & RUN_CH) {
+    if ((core.run_flag & RUN_CH)) {
         free(core.nvm_ch);
         core.run_flag ^= RUN_CH;
     }
@@ -885,7 +895,7 @@ static void nvm_clean_all ()
     }
 
     /* Clean all media managers */
-    if (core.run_flag & RUN_MMGR) {
+    if ((core.run_flag & RUN_MMGR) && stop_all) {
         while (core.mmgr_count) {
             mmgr = LIST_FIRST(&mmgr_head);
             nvm_unregister_mmgr(mmgr);
@@ -898,12 +908,19 @@ static void nvm_clean_all ()
         nvme_exit();
         core.run_flag ^= RUN_NVME;
     }
-    if ((core.run_flag & RUN_TESTS) == 0 && (core.run_flag & RUN_NVME_ALLOC)) {
+    if ((core.run_flag & RUN_TESTS) == 0 && (core.run_flag & RUN_NVME_ALLOC)
+                                                                 && stop_all) {
         free(core.nvm_nvme_ctrl);
         core.run_flag ^= RUN_NVME_ALLOC;
     }
 
     printf("OX Controller closed succesfully.\n");
+}
+
+int nvm_restart ()
+{
+    nvm_clear_all (NVM_RESTART);
+    return nvm_init (NVM_RESTART);
 }
 
 static struct nvm_mmgr *nvm_get_mmgr (char *name)
@@ -950,9 +967,6 @@ static void nvm_printerror (int error)
 
 static void nvm_print_log ()
 {
-    printf("OX Controller started succesfully. "
-            "Log: /var/log/nvme.log\n");
-
     log_info("[nvm: OX Controller ready.]\n");
     log_info("  [nvm: Active pci handler: %s]\n", core.nvm_pcie->name);
     log_info("  [nvm: %d media manager(s) up, total of %d channels]\n",
@@ -1033,12 +1047,13 @@ int nvm_init_ctrl (int argc, char **argv)
     printf("OX Controller is starting. Please, wait...\n");
     log_info("[nvm: OX Controller is starting...]\n");
 
-    ret = nvm_init();
+    ret = nvm_init(NVM_FULL_UPDOWN);
     if(ret)
         goto CLEAN;
 
     nvm_print_log();
 
+    core.run_flag |= RUN_TESTS;
     switch (exec) {
         case OX_TEST_MODE:
             modet_fn = core.tests_init->start;
@@ -1063,10 +1078,10 @@ int nvm_init_ctrl (int argc, char **argv)
 CLEAN:
     printf(" ERROR 0x%x. Aborting. Check log file.\n", ret);
     nvm_printerror(ret);
-    nvm_clean_all();
+    nvm_clear_all(NVM_FULL_UPDOWN);
     return -1;
 OUT:
-    nvm_clean_all();
+    nvm_clear_all(NVM_FULL_UPDOWN);
     return 0;
 }
 

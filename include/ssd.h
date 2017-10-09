@@ -60,6 +60,9 @@
 #define NVM_SYNCIO_FLAG_SYNC   0x2
 #define NVM_SYNCIO_FLAG_DEC    0x4
 
+#define NVM_FULL_UPDOWN        0x1
+#define NVM_RESTART            0x0
+
 /* All media managers must accept page r/w of NVM_PG_SIZE + OOB_SIZE*/
 #define NVM_PG_SIZE            0x4000
 #define NVM_OOB_BITS           6
@@ -416,6 +419,7 @@ struct core_struct {
 };
 
 /* core functions */
+int  nvm_restart ();
 int  nvm_register_mmgr(struct nvm_mmgr *);
 int  nvm_register_pcie_handler(struct nvm_pcie *);
 int  nvm_register_ftl (struct nvm_ftl *);

@@ -356,7 +356,7 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
             (uint64_t) phy_addr[prp_map] + sec_sz * c :
             (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec[c];
 
-        if (cmd->dfc_io.local_dma)
+        if (cmd->dfc_io.local_dma & dma_flag)
             continue;
 
         if (cmd->host_addr[c] > core.nvm_pcie->host_io_mem->paddr +

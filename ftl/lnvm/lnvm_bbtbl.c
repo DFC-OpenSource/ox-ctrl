@@ -304,7 +304,7 @@ int lnvm_get_bbt_nvm (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
     pg = 0;
     do {
         memset (buf, 0, buf_sz * n_pl);
-        ret = lnvm_io_rsv_blk (ch, MMGR_READ_PG, buf_vec, pg);
+        ret = lnvm_io_rsv_blk (ch, MMGR_READ_PG, (void **) buf_vec, pg);
 
         /* get info from OOB area (64 bytes) in plane 0 */
         memcpy(&nvm_bbt, buf + pg_sz, sizeof(struct lnvm_bbtbl));
