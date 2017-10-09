@@ -42,6 +42,7 @@ typedef struct ox_cmd {
 
 int cmdline_set_debug (char *line, ox_cmd *cmd);
 int cmdline_show_debug (char *line, ox_cmd *cmd);
+int cmdline_show_mq_status (char *line, ox_cmd *cmd);
 int cmdline_exit (char *line, ox_cmd *cmd);
 
 void cmdline_start (void);
