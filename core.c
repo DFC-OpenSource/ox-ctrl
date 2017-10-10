@@ -764,6 +764,9 @@ int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
     }
 
     ppa = arg[0];
+    if (ppa->g.ch >= core.nvm_ch_count)
+        goto OUT;
+
     ch = core.nvm_ch[ppa->g.ch];
     if (nvm_memcheck(ch))
         goto OUT;

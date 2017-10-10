@@ -89,13 +89,12 @@ struct nvm_ppa_addr {
     /* Generic structure for all addresses */
     union {
         struct {
-            uint64_t sec    : 2;
-            uint64_t pl     : 1;
-            uint64_t ch     : 3;
-            uint64_t lun    : 2;
-            uint64_t pg     : 9;
-            uint64_t blk    : 10;
-            uint64_t rsv    : 37;
+            uint64_t sec    : 8;
+            uint64_t pl     : 8;
+            uint64_t ch     : 8;
+            uint64_t lun    : 8;
+            uint64_t pg     : 16;
+            uint64_t blk    : 16;
         } g;
 
         uint64_t ppa;

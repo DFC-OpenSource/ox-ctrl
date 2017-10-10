@@ -442,12 +442,12 @@ void lnvm_init_id_ctrl(LnvmIdCtrl *ln_id)
     ln_id->cap = LNVM_CAP;
     ln_id->dom = LNVM_DOM;
 
-    ppaf->sect_len    = (uint8_t) log2 (LNVM_SEC_PG);
-    ppaf->pln_len     = (uint8_t) log2 (LNVM_PLANES);
-    ppaf->ch_len      = (uint8_t) log2 (LNVM_CH);
-    ppaf->lun_len     = (uint8_t) log2 (LNVM_LUN_CH);
-    ppaf->pg_len      = (uint8_t) log2 (LNVM_PG_BLK);
-    ppaf->blk_len     = (uint8_t) log2 (LNVM_BLK_LUN);
+    ppaf->sect_len    = (uint8_t) log2 (0xff + 1);
+    ppaf->pln_len     = (uint8_t) log2 (0xff + 1);
+    ppaf->ch_len      = (uint8_t) log2 (0xff + 1);
+    ppaf->lun_len     = (uint8_t) log2 (0xff + 1);
+    ppaf->pg_len      = (uint8_t) log2 (0xffff + 1);
+    ppaf->blk_len     = (uint8_t) log2 (0xffff + 1);
 
     ppaf->sect_offset  = 0;
     ppaf->pln_offset  += ppaf->sect_len;
