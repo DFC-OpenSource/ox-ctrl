@@ -337,15 +337,15 @@ static int lnvm_init_channel (struct nvm_channel *ch)
     /* create and flush bad block table if it does not exist */
     /* this procedure will erase the entire device (only in test mode) */
     if (bbt->magic == FTL_LNVM_MAGIC) {
-        printf(" [lnvm: Channel %d. Creating bad block table...\n", ch->ch_id);
-        ret = lnvm_bbt_create (lch, bbt);
+        printf(" [lnvm: Channel %d. Creating bad block table...]\n", ch->ch_id);
+        ret = lnvm_bbt_create (lch, bbt, LNVM_BBT_EMERGENCY);
         if (ret) goto ERR;
         ret = lnvm_flush_bbt (lch, bbt);
         if (ret) goto ERR;
     }
 
     LIST_INSERT_HEAD(&ch_head, lch, entry);
-    log_info("    [lnvm: channel %d started with %d bad blocks.\n",ch->ch_id,
+    log_info("    [lnvm: channel %d started with %d bad blocks.]\n",ch->ch_id,
                                                                 bbt->bb_count);
     return 0;
 
@@ -356,7 +356,7 @@ FREE_BBTBL:
 FREE_LCH:
     free(lch);
     log_err("[lnvm ERR: Ch %d -> Not possible to read/create bad block "
-                                                        "table.\n", ch->ch_id);
+                                                        "table.]\n", ch->ch_id);
     return ret;
 }
 

@@ -33,6 +33,9 @@ enum lnvm_bbt_state {
     NVM_BBT_HMRK = 0x8  // Block has been marked by host side
 };
 
+#define LNVM_BBT_EMERGENCY   0x0 // Creates the bbt without erasing the channel
+#define LNVM_BBT_FULL        0x1 // Checks for bad blocks erasing the channel
+
 struct lnvm_page {
 
 };
@@ -52,7 +55,7 @@ struct lnvm_channel {
 };
 
 int lnvm_get_bbt_nvm (struct lnvm_channel *, struct lnvm_bbtbl *);
-int lnvm_bbt_create (struct lnvm_channel *, struct lnvm_bbtbl *);
+int lnvm_bbt_create (struct lnvm_channel *, struct lnvm_bbtbl *, uint8_t);
 int lnvm_flush_bbt (struct lnvm_channel *, struct lnvm_bbtbl *);
 
 #endif /* FTL_LNVM_H */

@@ -1006,6 +1006,21 @@ int nvm_memcheck (void *mem) {
     return invalid;
 }
 
+int nvm_contains_ppa (struct nvm_ppa_addr *list, uint32_t list_sz,
+                                                        struct nvm_ppa_addr ppa)
+{
+    int i;
+
+    if (!list)
+        return 0;
+
+    for (i = 0; i < list_sz; i++)
+        if (ppa.ppa == list[i].ppa)
+            return 1;
+
+    return 0;
+}
+
 int nvm_test_unit (struct nvm_init_arg *args)
 {
     if (core.tests_init->init) {

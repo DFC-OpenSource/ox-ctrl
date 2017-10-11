@@ -429,6 +429,7 @@ void nvm_complete_ftl (struct nvm_io_cmd *);
 void nvm_callback (struct nvm_mmgr_io_cmd *);
 int  nvm_dma (void *, uint64_t, ssize_t, uint8_t);
 int  nvm_memcheck (void *);
+int  nvm_contains_ppa (struct nvm_ppa_addr *, uint32_t, struct nvm_ppa_addr);
 int  nvm_ftl_cap_exec (uint8_t, void **, int);
 int  nvm_init_ctrl (int, char **);
 int  nvm_test_unit (struct nvm_init_arg *);
