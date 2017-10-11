@@ -249,7 +249,7 @@ int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
         l_addr = ch->ftl_rsv_list[rsv].g.lun * ch->geometry->blk_per_lun * n_pl;
         b_addr = ch->ftl_rsv_list[rsv].g.blk * n_pl;
         pl_addr = ch->ftl_rsv_list[rsv].g.pl;
-        bbt->tbl[l_addr + b_addr + pl_addr] = 0x1;
+        bbt->tbl[l_addr + b_addr + pl_addr] = NVM_BBT_DMRK;
     }
 
     /* Set MMGR reserved bad blocks */
@@ -257,7 +257,7 @@ int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
         l_addr = ch->mmgr_rsv_list[rsv].g.lun * ch->geometry->blk_per_lun*n_pl;
         b_addr = ch->mmgr_rsv_list[rsv].g.blk * n_pl;
         pl_addr = ch->mmgr_rsv_list[rsv].g.pl;
-        bbt->tbl[l_addr + b_addr + pl_addr] = 0x1;
+        bbt->tbl[l_addr + b_addr + pl_addr] = NVM_BBT_DMRK;
     }
 
     /* Check for bad blocks in the whole channel */
@@ -270,7 +270,7 @@ int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt)
         l_addr = bbt_tmp[i].g.lun * ch->geometry->blk_per_lun * n_pl;
         b_addr = bbt_tmp[i].g.blk * n_pl;
         pl_addr = bbt_tmp[i].g.pl;
-        bbt->tbl[l_addr + b_addr + pl_addr] = 0x1;
+        bbt->tbl[l_addr + b_addr + pl_addr] = NVM_BBT_BAD;
     }
 
     return 0;
