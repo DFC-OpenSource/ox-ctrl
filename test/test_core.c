@@ -272,7 +272,7 @@ void *tests_start (void *arg)
 
 void *tests_admin (void *arg)
 {
-    ox_admin_init (core.args_global);
+    ox_admin_init (arg);
 }
 
 void tests_complete_io  (NvmeRequest *req)

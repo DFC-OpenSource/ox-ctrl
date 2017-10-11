@@ -33,6 +33,7 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 #include "include/ssd.h"
+#include "include/tests.h"
 #include "include/cmdline.h"
 
 static char *seperator = " \t";
@@ -57,6 +58,32 @@ ox_cmd debug_cmd[] = {
           "Disables debugging\n"
           "\n"
           "    Will disable the display of live debugging information of NVMe commands."
+        },
+        { NULL, NULL, NULL, NULL, NULL, NULL }
+};
+
+ox_cmd admin_cmd[] = {
+        { "create-bbt",
+          NULL,
+          cmdline_admin,
+          "create-bbt",
+          "Create or update the bad block table",
+          "Create or update the bad block table\n"
+          "\n"
+          "    An interactive command that creates or updates the bad block table,\n"
+          "    which offers two modes:\n"
+          "        1 - Full scan (Check all blocks by erasing, writing and reading)\n"
+          "        2 - Emergency table (Creates an empty bad block table without\n"
+          "            erasing blocks)"
+        },
+        { "erase_blk",
+          NULL,
+          cmdline_admin,
+          "erase-blk",
+          "Erase specific block",
+          "Erase specific block\n"
+          "\n"
+          "    An interactive command that allows you to erase any specified block."
         },
         { NULL, NULL, NULL, NULL, NULL, NULL }
 };
@@ -132,6 +159,14 @@ ox_cmd main_cmd[] = {
           "Usage: show [sub-command]\n"
           "    Displays run-time information and status information."
         },
+        { "admin",
+          admin_cmd,
+          NULL,
+          NULL,
+          "Used for testing",
+          "Usage: show [sub-command]\n"
+          "    "
+        },
         { "exit",
           NULL,
           cmdline_exit,
@@ -182,6 +217,25 @@ int cmdline_show_debug (char *line, ox_cmd *cmd)
 int cmdline_show_mq_status (char *line, ox_cmd *cmd)
 {
         ox_mq_show_all();
+        return 0;
+}
+
+int cmdline_admin (char *line, ox_cmd *cmd)
+{
+        struct nvm_init_arg args = {
+                4,
+                1,
+                CMDARG_FLAG_T,
+                { '\0' },
+                { '\0' },
+                { '\0' },
+        };
+        strcpy(args.admin_task, (char*) cmd->value);
+        if (core.tests_init->admin) {
+                core.tests_init->admin(&args);
+        } else {
+                printf("ox: Functionality not included in this binary\n");
+        }
         return 0;
 }
 

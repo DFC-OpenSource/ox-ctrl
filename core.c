@@ -1088,7 +1088,7 @@ int nvm_init_ctrl (int argc, char **argv)
     }
 
     if (core.tests_init->init) {
-        pthread_create(&mode_t, NULL, modet_fn, NULL);
+        pthread_create(&mode_t, NULL, modet_fn, core.args_global);
         pthread_join(mode_t, NULL);
     }
 
