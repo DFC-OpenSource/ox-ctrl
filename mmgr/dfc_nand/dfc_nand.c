@@ -338,7 +338,7 @@ static int dfcnand_read_page (struct nvm_mmgr_io_cmd *cmd_nvm)
      *  must DMA to LS2 memory. Sets the local_dma flag */
     if (sec_map || cmd_nvm->sync_count || (core.run_flag & RUN_TESTS))
         cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_DATA;
-    if (cmd->len[4])
+    if (cmd_nvm->md_prp)
         cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_OOB;
 
     /* If DMA is local, sets up the physical memory buffers */
@@ -421,7 +421,7 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 
     if (cmd_nvm->sync_count || (core.run_flag & RUN_TESTS)) {
         cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_DATA;
-        if (cmd->len[4])
+        if (cmd_nvm->md_prp)
             cmd->dfc_io.local_dma |= DFCNAND_LS2_DMA_OOB;
     }
 

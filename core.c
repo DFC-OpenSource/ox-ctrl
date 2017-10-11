@@ -814,6 +814,7 @@ int nvm_init (uint8_t start_all)
     core.ftl_count = 0;
 
     if (start_all) {
+        core.run_flag |= RUN_TESTS;
         core.mmgr_count = 0;
         core.nvm_ch_count = 0;
         core.nvm_nvme_ctrl = malloc (sizeof (NvmeCtrl));
@@ -1056,7 +1057,6 @@ int nvm_init_ctrl (int argc, char **argv)
 
     nvm_print_log();
 
-    core.run_flag |= RUN_TESTS;
     switch (exec) {
         case OX_TEST_MODE:
             modet_fn = core.tests_init->start;
