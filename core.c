@@ -1067,7 +1067,7 @@ int nvm_init_ctrl (int argc, char **argv)
         case OX_RUN_MODE:
             core.run_flag ^= RUN_TESTS;
             cmdline_start();
-            break;
+            goto OUT;
         default:
             goto CLEAN;
     }
