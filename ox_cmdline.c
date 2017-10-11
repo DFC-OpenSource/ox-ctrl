@@ -77,7 +77,7 @@ ox_cmd mq_cmd[] = {
           "      SU:  Submission Used queue  -  Ready to be processed\n"
           "      SW:  Submission Wait queue  -  In process\n"
           "      CF:  Completion Free queue  -  Available for new completion entries\n"
-          "      CU:  Completion Used queue  -  Processed, but waiting for completion\n"
+          "      CU:  Completion Used queue  -  Processed, but waiting for completion"
         },
         { NULL, NULL, NULL, NULL, NULL, NULL }
 };
@@ -90,7 +90,7 @@ ox_cmd show_cmd[] = {
           "Shows if debugging mode is enabled",
           "Shows if debugging mode is enabled\n"
           "\n"
-          "    Displays if reporting of live debugging information of NVMe commands"
+          "    Displays if reporting of live debugging information of NVMe commands\n"
           "    is enabled."
         },
         { "mq",
