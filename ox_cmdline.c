@@ -143,22 +143,6 @@ ox_cmd main_cmd[] = {
           "    Displays brief summaries of builtin commands. If a command is\n"
           "    specified, it will give a listing of all its sub-commands."
         },
-        { "debug",
-          debug_cmd,
-          NULL,
-          NULL,
-          "Enables or disables debugging output",
-          "Usage: debug [sub-command]\n"
-          "    Enables or disables debugging output."
-        },
-        { "show",
-          show_cmd,
-          NULL,
-          NULL,
-          "Displays run-time information",
-          "Usage: show [sub-command]\n"
-          "    Displays run-time information and status information."
-        },
         { "admin",
           admin_cmd,
           NULL,
@@ -166,6 +150,14 @@ ox_cmd main_cmd[] = {
           "Used for testing",
           "Usage: show [sub-command]\n"
           "    "
+        },
+        { "debug",
+          debug_cmd,
+          NULL,
+          NULL,
+          "Enables or disables debugging output",
+          "Usage: debug [sub-command]\n"
+          "    Enables or disables debugging output."
         },
         { "exit",
           NULL,
@@ -179,6 +171,14 @@ ox_cmd main_cmd[] = {
           "    functionality."
 
 
+        },
+        { "show",
+          show_cmd,
+          NULL,
+          NULL,
+          "Displays run-time information",
+          "Usage: show [sub-command]\n"
+          "    Displays run-time information and status information."
         },
         { NULL, NULL, NULL, NULL, NULL, NULL }
 };
