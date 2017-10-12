@@ -76,7 +76,7 @@ ox_cmd admin_cmd[] = {
           "        2 - Emergency table (Creates an empty bad block table without\n"
           "            erasing blocks)"
         },
-        { "erase_blk",
+        { "erase-blk",
           NULL,
           cmdline_admin,
           "erase-blk",
