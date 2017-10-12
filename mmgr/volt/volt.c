@@ -671,7 +671,7 @@ struct ox_mq_config volt_mq = {
     .sq_fn      = volt_execute_io,
     .cq_fn      = volt_callback,
     .to_fn      = volt_req_timeout,
-    .to_usec    = VOLT_QUEUE_TO,
+    .to_usec    = 0,
     .flags      = 0x0,
 };
 

@@ -48,6 +48,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include "uatomic.h"
+#include "lightnvm.h"
 
 #define MAX_NAME_SIZE           31
 #define NVM_QUEUE_RETRY         16
@@ -89,13 +90,13 @@ struct nvm_ppa_addr {
     /* Generic structure for all addresses */
     union {
         struct {
-            uint64_t sec    : 2;
-            uint64_t pl     : 1;
-            uint64_t ch     : 3;
-            uint64_t lun    : 2;
-            uint64_t pg     : 9;
-            uint64_t blk    : 10;
-            uint64_t rsv    : 37;
+            uint64_t sec    : LNVM_SEC_BITS;
+            uint64_t pl     : LNVM_PL_BITS;
+            uint64_t ch     : LNVM_CH_BITS;
+            uint64_t lun    : LNVM_LUN_BITS;
+            uint64_t pg     : LNVM_PG_BITS;
+            uint64_t blk    : LNVM_BLK_BITS;
+            uint64_t rsv    : LNVM_RSV_BITS;
         } g;
 
         uint64_t ppa;

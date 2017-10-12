@@ -253,7 +253,8 @@ int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt,
         log_info("  [lnvm: Emergency bad block table created on channel %d. "
                "It is recommended the creation using full scan.]\n", ch->ch_id);
         printf ("  [WARNING: Emergency bad block table created on channel %d.\n"
-       "             Use 'ox-ctrl-test admin -t create-bbt' for full scan.]\n");
+                          "             Use 'ox-ctrl-test admin -t create-bbt' "
+                                                "for full scan.]\n", ch->ch_id);
     }
 
     lch->bbtbl->bb_count = bb_count;

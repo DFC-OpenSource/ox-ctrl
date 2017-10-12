@@ -54,6 +54,10 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
                uint64_t *md_prp, uint16_t size, uint64_t dt_sz, uint64_t md_sz)
 {
     int i;
+    char buf[4096];
+
+    setbuffer (stdout, buf, 4096);
+
     printf(" Number of sectors: %d\n", size);
     printf(" DMA size: %lu (data) + %lu (meta) = %lu bytes\n",
                                                  dt_sz, md_sz, dt_sz + md_sz);
@@ -63,6 +67,9 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
                                 list[i].g.lun, list[i].g.blk, list[i].g.pl,
                                 list[i].g.pg, list[i].g.sec, prp[i]);
     printf (" [meta_prp(0): 0x%016lx\n", md_prp[0]);
+
+    fflush (stdout);
+    setlinebuf (stdout);
 }
 
 void lnvm_set_default(LnvmCtrl *ctrl)
@@ -442,12 +449,12 @@ void lnvm_init_id_ctrl(LnvmIdCtrl *ln_id)
     ln_id->cap = LNVM_CAP;
     ln_id->dom = LNVM_DOM;
 
-    ppaf->sect_len    = (uint8_t) log2 (LNVM_SEC_PG);
-    ppaf->pln_len     = (uint8_t) log2 (LNVM_PLANES);
-    ppaf->ch_len      = (uint8_t) log2 (LNVM_CH);
-    ppaf->lun_len     = (uint8_t) log2 (LNVM_LUN_CH);
-    ppaf->pg_len      = (uint8_t) log2 (LNVM_PG_BLK);
-    ppaf->blk_len     = (uint8_t) log2 (LNVM_BLK_LUN);
+    ppaf->sect_len    = (uint8_t) LNVM_SEC_BITS;
+    ppaf->pln_len     = (uint8_t) LNVM_PL_BITS;
+    ppaf->ch_len      = (uint8_t) LNVM_CH_BITS;
+    ppaf->lun_len     = (uint8_t) LNVM_LUN_BITS;
+    ppaf->pg_len      = (uint8_t) LNVM_PG_BITS;
+    ppaf->blk_len     = (uint8_t) LNVM_BLK_BITS;
 
     ppaf->sect_offset  = 0;
     ppaf->pln_offset  += ppaf->sect_len;
