@@ -337,7 +337,8 @@ static int lnvm_init_channel (struct nvm_channel *ch)
     /* create and flush bad block table if it does not exist */
     /* this procedure will erase the entire device (only in test mode) */
     if (bbt->magic == FTL_LNVM_MAGIC) {
-        printf(" [lnvm: Channel %d. Creating bad block table...]\n", ch->ch_id);
+        printf(" [lnvm: Channel %d. Creating bad block table...]", ch->ch_id);
+        fflush(stdout);
         ret = lnvm_bbt_create (lch, bbt, LNVM_BBT_EMERGENCY);
         if (ret) goto ERR;
         ret = lnvm_flush_bbt (lch, bbt);

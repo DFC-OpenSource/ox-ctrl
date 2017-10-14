@@ -43,11 +43,12 @@ extern struct core_struct core;
  * ch  -> channel to be checked
  */
 static struct nvm_ppa_addr *lnvm_check_ch_bb (struct nvm_ppa_addr *bbt,
-                                     uint16_t *bbt_sz,  struct nvm_channel *ch)
+                       uint16_t *bbt_sz,  struct nvm_channel *ch, uint8_t type)
 {
-    int ret, i, pl, blk, lun, bb_count = 0;
+    int ret = 0, i, pl, pl2, pg, blk, lun, bb_count = 0;
     struct nvm_mmgr_io_cmd *cmd;
     uint8_t n_pl = ch->geometry->n_of_planes;
+    uint8_t *bufw, *bufr;
 
     log_info("    [lnvm: Checking bad blocks on channel %d...]\n",ch->ch_id);
 
@@ -62,6 +63,20 @@ static struct nvm_ppa_addr *lnvm_check_ch_bb (struct nvm_ppa_addr *bbt,
     cmd = malloc(sizeof(struct nvm_mmgr_io_cmd));
     if (!cmd)
         return NULL;
+
+    bufw = malloc(NVM_PG_SIZE + NVM_OOB_SIZE);
+    if (!bufw) {
+        free (cmd);
+        return NULL;
+    }
+    memset (bufw, 0xac, NVM_PG_SIZE + NVM_OOB_SIZE);
+
+    bufr = malloc(NVM_PG_SIZE + NVM_OOB_SIZE);
+    if (!bufr) {
+        free (cmd);
+        free (bufw);
+        return NULL;
+    }
 
     for (lun = 0; lun < ch->geometry->lun_per_ch; lun++) {
         for (blk = 0; blk < ch->geometry->blk_per_lun; blk++) {
@@ -81,8 +96,36 @@ static struct nvm_ppa_addr *lnvm_check_ch_bb (struct nvm_ppa_addr *bbt,
                                                                 n_pl, cmd->ppa))
                     continue;
 
-                ret = nvm_submit_sync_io (ch, cmd, NULL, MMGR_ERASE_BLK);
+                if (ret = nvm_submit_sync_io (ch, cmd, NULL, MMGR_ERASE_BLK))
+                    goto MARK_BLK;
 
+                if ((pl == n_pl - 1) && (type == LNVM_BBT_FULL)) {
+                    for (pg = 0; pg < ch->geometry->pg_per_blk; pg++) {
+                        cmd->ppa.g.pg = pg;
+                        for (pl2 = 0; pl2 < n_pl; pl2++) {
+                            cmd->ppa.g.pl = pl2;
+                            if (ret = nvm_submit_sync_io
+                                                (ch, cmd, bufw, MMGR_WRITE_PG))
+                                goto MARK_BLK;
+                        }
+                    }
+                    for (pg = 0; pg < ch->geometry->pg_per_blk; pg++) {
+                        cmd->ppa.g.pg = pg;
+                        for (pl2 = 0; pl2 < n_pl; pl2++) {
+                            cmd->ppa.g.pl = pl2;
+                            memset (bufr, 0x0, NVM_PG_SIZE + NVM_OOB_SIZE);
+                            if (ret = nvm_submit_sync_io
+                                                 (ch, cmd, bufr, MMGR_READ_PG))
+                                goto MARK_BLK;
+
+                            if (ret = memcmp (bufw, bufr,
+                                                   NVM_PG_SIZE + NVM_OOB_SIZE))
+                                goto MARK_BLK;
+                        }
+                    }
+                }
+
+MARK_BLK:
                 if (ret) {
                     /* Avoids adding the same block (multiple plane failure) */
                     if (nvm_contains_ppa(bbt, bb_count, cmd->ppa))
@@ -100,9 +143,17 @@ static struct nvm_ppa_addr *lnvm_check_ch_bb (struct nvm_ppa_addr *bbt,
                                                                       lun, blk);
                 }
             }
+            printf("\r");
+            printf(" [lnvm: Channel %d. Creating bad block table... (%d/%d)]",
+                  ch->ch_id, (lun * ch->geometry->blk_per_lun * n_pl) +
+                  ((blk+1) * n_pl),
+                  ch->geometry->blk_per_lun * ch->geometry->lun_per_ch * n_pl);
+            fflush(stdout);
         }
     }
     free(cmd);
+    free(bufw);
+    free(bufr);
     *bbt_sz = bb_count;
 
     return bbt;
@@ -244,16 +295,16 @@ int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt,
         bbt->tbl[l_addr + b_addr + pl_addr] = NVM_BBT_DMRK;
     }
 
-    if (type == LNVM_BBT_FULL) {
+    if (type == LNVM_BBT_FULL || type == LNVM_BBT_ERASE) {
         /* Check for bad blocks in the whole channel */
-        bbt_tmp = lnvm_check_ch_bb (bbt_tmp, &bb_count, ch);
+        bbt_tmp = lnvm_check_ch_bb (bbt_tmp, &bb_count, ch, type);
         if (!bbt_tmp)
             return -1;
     } else {
         log_info("  [lnvm: Emergency bad block table created on channel %d. "
                "It is recommended the creation using full scan.]\n", ch->ch_id);
-        printf ("  [WARNING: Emergency bad block table created on channel %d.\n"
-                          "             Use 'ox-ctrl-test admin -t create-bbt' "
+        printf ("\n  [WARNING: Emergency bad block table created on channel %d."
+                "\n             Use 'ox-ctrl-test admin -t create-bbt' "
                                                 "for full scan.]\n", ch->ch_id);
     }
 

@@ -163,7 +163,7 @@ static int oxadmin_create_bbt (int type, struct nvm_channel *ch)
     bbt->magic = 0;
     bbt->bb_sz = tblks;
 
-    printf("\n [lnvm: Channel %d. Creating bad block table...\n", ch->ch_id);
+    printf("\n [lnvm: Channel %d. Creating bad block table...]", ch->ch_id);
     ret = lnvm_bbt_create (lch, bbt, type);
     if (ret) goto ERR;
     ret = lnvm_flush_bbt (lch, bbt);
@@ -187,7 +187,11 @@ static int oxadmin_confirm_bbt_creation (int type, int ch_i)
     printf("\n  Creation type: ");
     switch (type) {
         case LNVM_BBT_FULL:
-            printf ("Full scan (ALL DATA WILL BE LOST)\n");
+            printf ("Full scan (ALL DATA WILL BE LOST. "
+                                        "FULL SCAN MIGHT TAKE A LONG TIME)\n");
+            break;
+        case LNVM_BBT_ERASE:
+            printf ("Fast scan (ALL DATA WILL BE LOST)\n");
             break;
         case LNVM_BBT_EMERGENCY:
             printf ("Emergency table (ALL BLOCKS WILL BE SET AS GOOD)\n");
@@ -212,14 +216,14 @@ static int oxadmin_create_bbt_task ()
 
     printf("\n Bad Block Table creation/update.");
     printf("\n  Bad block creation types: ");
-    printf("\n   1 - Full scan (Check all blocks by erasing, "
-                                                       "writing and reading)");
-    printf("\n   2 - Emergency table (Creates an empty bad block "
+    printf("\n   1 - Full scan (Erase, write full, read full, compare buffers)");
+    printf("\n   2 - Fast scan (Only erase the blocks)");
+    printf("\n   3 - Emergency table (Creates an empty bad block "
                                             "table without erasing blocks)\n");
     printf("\n  Specify the type: ");
     scanf("%d", &type);
 
-    if (type < 1 || type > 2)
+    if (type < 1 || type > 3)
         goto ERR_T;
 
     printf("  Specify the channel: ");
@@ -235,6 +239,9 @@ static int oxadmin_create_bbt_task ()
             type = LNVM_BBT_FULL;
             break;
         case 2:
+            type = LNVM_BBT_ERASE;
+            break;
+        case 3:
             type = LNVM_BBT_EMERGENCY;
             break;
         default:

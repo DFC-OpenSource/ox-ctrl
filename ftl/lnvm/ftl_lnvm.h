@@ -34,7 +34,11 @@ enum lnvm_bbt_state {
 };
 
 #define LNVM_BBT_EMERGENCY   0x0 // Creates the bbt without erasing the channel
-#define LNVM_BBT_FULL        0x1 // Checks for bad blocks erasing the channel
+#define LNVM_BBT_ERASE       0x1 // Checks for bad blocks only erasing the block
+#define LNVM_BBT_FULL        0x2 // Checks for bad blocks erasing the block,
+                                 //   writing and reading all pages,
+                                 //   and comparing the buffers
+
 
 struct lnvm_page {
 
