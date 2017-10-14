@@ -524,9 +524,11 @@ NEXT_CH:
             } else {
                 cmd = Desc_trck[desc_tbl][desc_idx[desc_tbl]].
                                                            DescSt_ptr->req_ptr;
-                err = csr[cmd->chip]->err_code;
-                if (err == 1 || err == 2) {
-                    io_st = 1;
+                if (cmd) {
+                    err = csr[cmd->chip]->err_code;
+                    if (err == 1 || err == 2) {
+                        io_st = 1;
+                    }
                 }
                 mutex_unlock(&Desc_trck[desc_tbl][desc_idx[desc_tbl]].
                                                         DescSt_ptr->available);
