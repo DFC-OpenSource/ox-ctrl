@@ -254,11 +254,13 @@ struct nvm_mmgr {
 typedef void        (nvm_pcie_isr_notify)(void *);
 typedef void        (nvm_pcie_exit)(void);
 typedef void        *(nvm_pcie_nvme_consumer) (void *);
+typedef void        (nvm_pcie_reset) (void);
 
 struct nvm_pcie_ops {
     nvm_pcie_nvme_consumer  *nvme_consumer;
     nvm_pcie_isr_notify     *isr_notify; /* notify host about completion */
     nvm_pcie_exit           *exit;
+    nvm_pcie_reset          *reset;
 };
 
 struct nvm_pcie {

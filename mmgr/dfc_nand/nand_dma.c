@@ -34,7 +34,8 @@ uint64_t bar_address[2][6];
 int fpga_version = 0, size[2];
 
 static pthread_mutex_t m_desc_mutex;
-pthread_t io_completion;
+static uint8_t nand_running;
+pthread_t io_completion = 0;
 
 struct ad_trans {
     unsigned long long int addr[70];
@@ -208,6 +209,37 @@ int nand_set_feature(uint16_t feat_addr, uint16_t length, void *feature_data) {
     return SUCCESS;
 }
 
+static void reset_all ()
+{
+    int tbl;
+
+    nand_running = 1;
+
+    if (io_completion > 0) {
+        pthread_join(io_completion, NULL);
+        io_completion = 0;
+    }
+
+    reset_delay = 1;
+    first_dma = 0;
+    reset_dma_descriptors();
+
+    for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
+        csr[tbl]->reset = 1;
+        csr[tbl]->reset = 0;
+    }
+
+    if (pthread_create(&io_completion, NULL,(void *) io_completer, NULL) != 0)
+        log_err (" [mmgr: ERROR. nand completion thread not started.\n");
+
+    nand_running = 0;
+
+    usleep (1000);
+    nand_reset();
+    usleep (1000);
+    reset_delay = 0;
+}
+
 uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
                                                                 void *req_ptr) {
     uint8_t i, tbl = 0, fdma = 0;
@@ -337,19 +369,7 @@ RESET:
         return -1;
 
     log_info ("[dfc_nand WARNING: Reseting channels...]\n");
-    reset_delay = 1;
-    first_dma = 0;
-    reset_dma_descriptors();
-
-    for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
-        csr[tbl]->reset = 1;
-        csr[tbl]->reset = 0;
-    }
-
-    usleep (1000);
-    nand_reset();
-    usleep (1000);
-    reset_delay = 0;
+    reset_all ();
 
     return -1;
 }
@@ -364,8 +384,6 @@ void *io_completer() {
     uint64_t desc_tbl = 0, j = 0;
     uint64_t desc_idx[DESC_PER_TBL];
     uint32_t tail_idx = 0, csf_val = 0;
-    nand_cmd_struct *cmd_struct =
-                        (nand_cmd_struct *) malloc(sizeof (nand_cmd_struct));
 
     int seln, fd, configfd, count, nb;
     fd_set readfds;
@@ -384,7 +402,7 @@ void *io_completer() {
     FD_ZERO(&readfds);
 #endif
 
-    while (1) {
+    while (!nand_running) {
 #ifdef INTR
         timeout = def_time;
 WAIT_INT:
@@ -402,9 +420,12 @@ WAIT_INT:
             read(fd, &count, sizeof (uint32_t));
         }
 #endif
-        while (1) {
+        while (!nand_running) {
             do {
 NEXT_CH:
+                if (nand_running)
+                    goto OUT;
+
                 if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].is_used ==
                                                               TRACK_IDX_USED) {
                     break;
@@ -423,6 +444,9 @@ NEXT_CH:
             } while (1);
 
             do {
+                if (nand_running)
+                    goto OUT;
+
                 mutex_lock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
                                                        DescSt_ptr->available));
                 if (!Desc_trck[desc_tbl][desc_idx[desc_tbl]]
@@ -450,6 +474,9 @@ NEXT_CH:
             }
 
             do {
+                if (nand_running)
+                    goto OUT;
+
                 csf = (csf_reg *) ((uint32_t*) (Desc_trck[desc_tbl]
                                    [desc_idx[desc_tbl]].DescSt_ptr->ptr) + 15);
                 csf_val = *((uint32_t *) csf);
@@ -519,6 +546,8 @@ NEXT_CH:
                 desc_tbl++;
         }
     }
+OUT:
+    return NULL;
 }
 
 /*Have allocated 4MB * 70 units of memory in uio_pci_generic driver.
@@ -708,7 +737,6 @@ uint8_t read_bar_address() {
     int i, ret = 0, MAX_BARS = 6;
     uint32_t *ver_reg;
 
-
     for (i = 0; i < MAX_BARS; i++) {
         ret = get_address(0, i);
         if (ret) {
@@ -732,6 +760,8 @@ uint8_t read_bar_address() {
             }
         }
     }
+    munmap(ver_reg, getpagesize());
+
     return SUCCESS;
 }
 
@@ -745,6 +775,7 @@ uint8_t nand_dm_init() {
     }
     ret = read_bar_address();
     if (ret) {
+        close (fd);
         return FAILURE;
     }
     /*Passing respective BAR address to do mmap based on FPGA image Version*/
@@ -762,8 +793,11 @@ uint8_t nand_dm_init() {
                 " Upgrade to 02.05.02 or 03.00.04 or 03.01.00 image version\n",
                 fpga_version & 0x00FF0000, fpga_version & 0x0000FF00,
                 fpga_version & 0x000000FF);
+        close (fd);
         return FAILURE;
     }
+    close (fd);
+
     if (ret) {
         perror("mmap failed:");
         return FAILURE;
@@ -782,17 +816,7 @@ uint8_t nand_dm_init() {
 
     init_dma_mgr();
 
-    if ((ret = pthread_create(&io_completion, NULL,
-                                        (void *) io_completer, NULL)) != 0) {
-        perror("pthread_create");
-        return FAILURE;
-    }
-
-    ret = nand_reset();
-    if (ret) {
-        perror("NAND_RESET:");
-        return FAILURE;
-    }
+    reset_all();
 
     /*Setting the feature to NAND_SYNC_MODE2 or ASYNC_MODE_5*/
     uint16_t cds_1[4] = {0, 0, 0, 0}, cds_2[4] = {0, 0, 0, 0},
@@ -819,8 +843,9 @@ uint8_t nand_dm_init() {
 }
 
 uint8_t nand_dm_deinit() {
-    pthread_cancel(io_completion);
+    nand_running = 1;
     pthread_join(io_completion, NULL);
+    io_completion = 0;
     virt_unmap();
     munmap(desc_tbl_addr, size[0] * getpagesize());
     munmap(ctrl_reg_addr, size[1] * getpagesize());

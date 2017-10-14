@@ -148,7 +148,7 @@ void *dfcpcie_req_processor (void *arg)
         FD_SET(uiofd, &readfds);
         FD_SET(uiofd1, &readfds);
         rc = select(max+1, &readfds, NULL, NULL, &timeout);
-        if(rc == -1) {
+        if(rc == -1 || n->running) {
             timeout = def_time;
             continue;
         } else if (rc == 0) {
@@ -388,6 +388,14 @@ static uint32_t *dfcpcie_get_iodbst_reg (void)
     return ((struct pci_ctrl *)pcie_dfc.ctrl)->iosqdb_bits;
 }
 
+static void dfcpcie_reset ()
+{
+    struct pci_ctrl *pcie = (struct pci_ctrl *) pcie_dfc.ctrl;
+
+    reset_iosqdb_bits(pcie);
+    reset_fifo(pcie);
+}
+
 static void dfcpcie_exit() {
     struct pci_ctrl *pcie = (struct pci_ctrl *) pcie_dfc.ctrl;
     pcie_dfc.running = 1; /* stop thread */
@@ -406,7 +414,8 @@ static void dfcpcie_exit() {
 struct nvm_pcie_ops pcidfc_ops = {
     .nvme_consumer      = dfcpcie_req_processor,
     .exit               = dfcpcie_exit,
-    .isr_notify         = dfcpcie_isr_notify
+    .isr_notify         = dfcpcie_isr_notify,
+    .reset              = dfcpcie_reset
 };
 
 int dfcpcie_init()

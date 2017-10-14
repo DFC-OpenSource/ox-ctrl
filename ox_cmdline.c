@@ -242,6 +242,7 @@ int cmdline_admin (char *line, ox_cmd *cmd)
 int cmdline_exit (char *line, ox_cmd *cmd)
 {
         core.nvm_nvme_ctrl->running = 1;
+        core.nvm_nvme_ctrl->stop = 1;
 }
 
 void cmdline_runcommand (char *line, ox_cmd *cmd)
@@ -296,7 +297,7 @@ void cmdline_start (void)
 
         rl_attempted_completion_function = command_completion;
 
-        while (!core.nvm_nvme_ctrl->running) {
+        while (!core.nvm_nvme_ctrl->stop) {
                 char *buffer = readline("ox> ");
                 if (!buffer || is_whitespace(buffer)) {
                         continue;

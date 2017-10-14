@@ -1019,6 +1019,7 @@ typedef struct NvmeCtrl {
     NvmeFeatureVal  features;
     NvmeIdCtrl      id_ctrl;
     uint8_t         running;
+    uint8_t         stop;
     uint8_t         aer_mask;
     TAILQ_HEAD (ctrl_aerhead, NvmeAsyncEvent)   aer_queue;
     pthread_mutex_t                             qs_req_mutex;

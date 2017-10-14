@@ -601,6 +601,8 @@ static void *ox_mq_to_thread (void *arg)
 
     do {
         usleep (mq->config->to_usec);
+        if (mq->stop)
+            break;
 
         for (i = 0; i < mq->config->n_queues; i++)
             ox_mq_check_queue_to(mq, &mq->queues[i]);
@@ -645,6 +647,7 @@ struct ox_mq *ox_mq_init (struct ox_mq_config *config)
     memset (mq->queues, 0, sizeof (struct ox_mq_queue) * config->n_queues);
 
     ox_mq_init_stats(&mq->stats);
+    mq->stop = 0;
 
     for (i = 0; i < config->n_queues; i++) {
         if (ox_mq_init_queue (&mq->queues[i], config->q_size,
@@ -702,12 +705,12 @@ static void ox_mq_free_ext_list (struct ox_mq *mq)
 
 void ox_mq_destroy (struct ox_mq *mq)
 {
-    ox_mq_free_queues(mq, mq->config->n_queues);
+    mq->stop = 1;
     if (mq->config->to_usec) {
-        pthread_cancel(mq->to_tid);
         pthread_join (mq->to_tid, NULL);
         ox_mq_free_ext_list (mq);
     }
+    ox_mq_free_queues(mq, mq->config->n_queues);
 
     LIST_REMOVE(mq, entry);
     mq_count--;

@@ -167,8 +167,7 @@ static int nvme_init_ctrl (NvmeCtrl *n)
     n->features.temp_thresh     = 0x14d;
     n->features.err_rec         = 0;
     n->features.volatile_wc     = n->id_ctrl.vwc;
-    n->features.num_queues      = (n->num_queues - 1) |
-		((n->num_queues - 1) << 16);
+    n->features.num_queues      = n->num_queues;
     n->features.int_coalescing  = n->intc_thresh | (n->intc_time << 8);
     n->features.write_atomicity = 0;
     n->features.async_config    = 0x0;

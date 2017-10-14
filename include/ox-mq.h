@@ -123,6 +123,7 @@ struct ox_mq {
     pthread_t                         to_tid;       /* timeout thread */
     LIST_HEAD(oxmq_ext, ox_mq_entry)  ext_list;     /* new allocated entries */
     struct ox_mq_stats                stats;
+    uint8_t                           stop;         /* Set to 1, stop threads */
 };
 
 struct ox_mq *ox_mq_init (struct ox_mq_config *);
