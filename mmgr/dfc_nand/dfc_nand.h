@@ -24,6 +24,8 @@
 #define DFCNAND_LS2_DMA_DATA   (1 << 0)
 #define DFCNAND_LS2_DMA_OOB    (1 << 1)
 
+#define DFCNAND_QUEUE_TO       1000000
+
 enum DFCNAND_COMMAND_ID {
     DFCNAND_PAGE_PROG           = 0xA,
     DFCNAND_PAGE_READ           = 0x1E,

@@ -15,9 +15,10 @@
 #include "../../include/ssd.h"
 #include "fpga_3_01_00/nand_dma.h"
 
+#define RESET_TIMEOUT 200000
+
 static uint32_t desc_idx[TBL_COUNT];
 static uint32_t desc_retry[TBL_COUNT];
-static int reset_delay;
 
 Desc_Track Desc_trck[TBL_COUNT][DESC_PER_TBL];
 Dma_Control DmaCtrl[TBL_COUNT];
@@ -34,7 +35,9 @@ uint64_t bar_address[2][6];
 int fpga_version = 0, size[2];
 
 static pthread_mutex_t m_desc_mutex;
-static uint8_t nand_running;
+static uint8_t nand_running; /* stop completion thread */
+static uint8_t reset_delay; /* delay threads during reset */
+static uint8_t comp_reset; /* notify that completion thread is idle for reset */
 pthread_t io_completion = 0;
 
 struct ad_trans {
@@ -58,25 +61,12 @@ void affinity(int cpuid, pthread_t thread) {
     }
 }
 
-static inline void reset_dma_descriptors(void) {
-    int iter, i;
-    csr_reg csr_reset = {0, 0, 0, 1, 1, 0};
-    for (iter = 0; iter < CHIP_COUNT; iter++) {
-        memcpy((void *) csr[iter], (void *) &csr_reset, sizeof (csr_reg));
-        DmaCtrl[iter].tail_idx = DmaCtrl[iter].head_idx = 0;
-        for (i = 0; i < (DESC_PER_TBL); i++) {
-            memset((nand_descriptor*) table[iter] + i, 0, sizeof (nand_descriptor));
-        }
-        desc_idx[iter] = 0;
-    }
-}
-
 int nand_page_prog(io_cmd *cmd_buf) {
     nand_cmd_struct *cmd_struct = &cmd_buf->nand_cmd;
 
     memset(cmd_struct, 0, sizeof (nand_cmd_struct));
     cmd_struct->row_addr = (cmd_buf->lun << 21) | ((cmd_buf->block & 0xFFF)
-                                                << 9) | (cmd_buf->page & 0x1FF);
+            << 9) | (cmd_buf->page & 0x1FF);
     cmd_struct->trgt_col_addr = cmd_buf->target << 29 | cmd_buf->col_addr;
     cmd_struct->db_LSB_0 = cmd_buf->host_addr[0] & 0xffffffff;
     cmd_struct->db_MSB_0 = cmd_buf->host_addr[0] >> 32;
@@ -90,17 +80,17 @@ int nand_page_prog(io_cmd *cmd_buf) {
     cmd_struct->len3_len2 = cmd_buf->len[3] << 16 | cmd_buf->len[2];
     cmd_struct->oob_LSB = cmd_buf->host_addr[4] & 0xffffffff;
     cmd_struct->oob_len_MSB = cmd_buf->len[4] << 20 | ((cmd_buf->host_addr[4]
-                                                            >> 32) & 0xfffff);
+            >> 32) & 0xfffff);
     if ((fpga_version == 0x00030100) || (fpga_version == 0x00030004)) {
         cmd_struct->control_fields = PAGE_PROG << 5 |
-                    (!(cmd_buf->block % 2)) << 4 | cmd_buf->dfc_io.rdy_bsy | 0;
+                (!(cmd_buf->block % 2)) << 4 | cmd_buf->dfc_io.rdy_bsy | 0;
     } else if (fpga_version == 0x00020502) {
         if (!(cmd_buf->lun) && !(cmd_buf->target)) {
             cmd_struct->control_fields = PAGE_PROG << 5 |
-                                    (!(cmd_buf->block % 2)) << 4 | 4 << 1 | 0;
+                    (!(cmd_buf->block % 2)) << 4 | 4 << 1 | 0;
         } else {
             cmd_struct->control_fields = PAGE_PROG << 5 |
-                                              (!(cmd_buf->block % 2)) << 4 | 0;
+                    (!(cmd_buf->block % 2)) << 4 | 0;
         }
 
     }
@@ -114,7 +104,7 @@ int nand_page_read(io_cmd *cmd_buf) {
     memset(cmd_struct, 0, sizeof (nand_cmd_struct));
 
     cmd_struct->row_addr = (cmd_buf->lun << 21) | ((cmd_buf->block & 0xFFF)
-                                                << 9) | (cmd_buf->page & 0x1FF);
+            << 9) | (cmd_buf->page & 0x1FF);
     cmd_struct->trgt_col_addr = cmd_buf->target << 29 | cmd_buf->col_addr;
     cmd_struct->db_LSB_0 = cmd_buf->host_addr[0] & 0xffffffff;
     cmd_struct->db_MSB_0 = cmd_buf->host_addr[0] >> 32;
@@ -128,7 +118,7 @@ int nand_page_read(io_cmd *cmd_buf) {
     cmd_struct->len3_len2 = cmd_buf->len[3] << 16 | cmd_buf->len[2];
     cmd_struct->oob_LSB = cmd_buf->host_addr[4] & 0xffffffff;
     cmd_struct->oob_len_MSB = cmd_buf->len[4] << 20 |
-                                    ((cmd_buf->host_addr[4] >> 32) & 0xfffff);
+            ((cmd_buf->host_addr[4] >> 32) & 0xfffff);
     cmd_struct->control_fields = PAGE_READ << 5 | cmd_buf->dfc_io.rdy_bsy | 1;
 
     make_desc(cmd_struct, cmd_buf->chip, READ_IO, cmd_buf);
@@ -141,7 +131,7 @@ int nand_block_erase(io_cmd *cmd_buf) {
     memset(cmd_struct, 0, sizeof (nand_cmd_struct));
 
     cmd_struct->row_addr = (cmd_buf->lun << 21) | ((cmd_buf->block & 0xFFF)
-                                                                        << 9);
+            << 9);
     cmd_struct->trgt_col_addr = cmd_buf->target << 29 | 0x0;
     cmd_struct->db_LSB_0 = 0;
     cmd_struct->db_MSB_0 = 0;
@@ -150,13 +140,13 @@ int nand_block_erase(io_cmd *cmd_buf) {
     memset(cmd_struct, 0, sizeof (nand_cmd_struct));
     /*Read Status*/
     cmd_struct->row_addr = (cmd_buf->lun << 21) | ((cmd_buf->block & 0xFFF)
-                                                                        << 9);
+            << 9);
     cmd_struct->trgt_col_addr = cmd_buf->target << 29 | 0x0;
     cmd_struct->db_LSB_0 = 0;
     cmd_struct->db_MSB_0 = 0;
     cmd_struct->len1_len0 = 0x2;
     cmd_struct->control_fields = READ_STATUS << 5 |
-                                          cmd_buf->dfc_io.rdy_bsy | 1 << 2 | 1;
+            cmd_buf->dfc_io.rdy_bsy | 1 << 2 | 1;
     make_desc(cmd_struct, cmd_buf->chip, READ_STS, cmd_buf);
 
     return SUCCESS;
@@ -165,7 +155,7 @@ int nand_block_erase(io_cmd *cmd_buf) {
 int nand_reset() {
     int i;
     nand_cmd_struct *cmd_struct =
-                        (nand_cmd_struct *) malloc(sizeof (nand_cmd_struct));
+            (nand_cmd_struct *) malloc(sizeof (nand_cmd_struct));
     memset(cmd_struct, 0, sizeof (nand_cmd_struct));
 
     for (i = 0; i < CHIP_COUNT; i++) {
@@ -189,7 +179,7 @@ int nand_set_feature(uint16_t feat_addr, uint16_t length, void *feature_data) {
     static int k = 0;
     int chip = 0, trgt = 0;
     nand_cmd_struct *cmd_struct =
-                        (nand_cmd_struct *) malloc(sizeof (nand_cmd_struct));
+            (nand_cmd_struct *) malloc(sizeof (nand_cmd_struct));
     memset(virt_addr[1]+(k * 0x1000), 0, 0x1000);
     memcpy(virt_addr[1]+(k * 1000), feature_data, length);
     for (chip = 0; chip < CHIP_COUNT; chip++) {
@@ -209,39 +199,74 @@ int nand_set_feature(uint16_t feat_addr, uint16_t length, void *feature_data) {
     return SUCCESS;
 }
 
-static void reset_all ()
-{
-    int tbl;
+static void setup_nand_desc_array() {
+    int i = 0, j, k = 0;
+    uint8_t *dma_table;
 
-    nand_running = 1;
-
-    if (io_completion > 0) {
-        pthread_join(io_completion, NULL);
-        io_completion = 0;
+    for (j = 0; j < CHIP_COUNT; j++) {
+        dma_table = table[j];
+        for (i = 0; i < DESC_PER_TBL; i++) {
+            DmaCtrl[j].DescSt[i].ptr = dma_table + (i * DESC_SIZE);
+            DmaCtrl[j].DescSt[i].valid = 1;
+            DmaCtrl[j].DescSt[i].page_phy_addr = phy_addr[0]+(k * 4096);
+            DmaCtrl[j].DescSt[i].page_virt_addr = virt_addr[0] + (k * 4096);
+            mutex_init(&DmaCtrl[j].DescSt[i].available, NULL);
+            k++;
+        }
     }
+}
 
+static inline void reset_dma_descriptors(void) {
+    int iter, i;
+    csr_reg csr_reset = {0, 0, 0, 1, 1, 0};
+
+    for (iter = 0; iter < CHIP_COUNT; iter++) {
+        memcpy((void *) csr[iter], (void *) &csr_reset, sizeof (csr_reg));
+
+        for (i = 0; i < (DESC_PER_TBL); i++) {
+            memset((nand_descriptor*) table[iter] + i, 0, sizeof (nand_descriptor));
+        }
+    }
+}
+
+static void reset_all() {
+    int tbl, index;
+
+    comp_reset = 1;
     reset_delay = 1;
-    first_dma = 0;
+
+    while (comp_reset && io_completion)
+        usleep (1);
+
+    setup_nand_desc_array();
     reset_dma_descriptors();
 
     for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
+        DmaCtrl[tbl].head_idx = 0;
+        desc_idx[tbl] = 0;
+        desc_retry[tbl] = 0;
+
+        table_sz[tbl]->table_size = 0x10;
+
         csr[tbl]->reset = 1;
         csr[tbl]->reset = 0;
+
+        for (index = 0; index < DESC_PER_TBL; index++)
+            memset (&Desc_trck[tbl][index], 0x0, sizeof (Desc_Track));
     }
 
-    if (pthread_create(&io_completion, NULL,(void *) io_completer, NULL) != 0)
-        log_err (" [mmgr: ERROR. nand completion thread not started.\n");
+    first_dma = 0;
 
-    nand_running = 0;
-
-    usleep (1000);
+    usleep(1000);
     nand_reset();
-    usleep (1000);
+    usleep(1000);
+
     reset_delay = 0;
+    comp_reset = 0;
 }
 
 uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
-                                                                void *req_ptr) {
+        void *req_ptr) {
     uint8_t i, tbl = 0, fdma = 0;
     nand_descriptor desc;
     uint16_t head_idx;
@@ -261,9 +286,9 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
     desc_retry[tid] = 0;
 
     do {
-        if (reset_delay == 1 && req_type != OTHERS)
+        if (reset_delay && req_type != OTHERS)
             return -1;
-        else if (desc_retry[tid] >= 1000)
+        else if (desc_retry[tid] >= RESET_TIMEOUT)
             goto RESET;
 
         if (Desc_trck[tid][desc_idx[tid]].is_used == TRACK_IDX_FREE) {
@@ -276,9 +301,9 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
     desc_retry[tid] = 0;
 
     do {
-        if (reset_delay == 1 && req_type != OTHERS)
+        if (reset_delay && req_type != OTHERS)
             return -1;
-        else if (desc_retry[tid] >= 1000)
+        else if (desc_retry[tid] >= RESET_TIMEOUT)
             goto RESET;
 
         head_idx = DmaCtrl[tid].head_idx;
@@ -294,16 +319,16 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
     if (cmd_struct) {
         if (req_type == READ_STS) {
             cmd_struct->db_LSB_0 = DmaCtrl[tid].DescSt[head_idx].page_phy_addr
-                                                                 & 0xffffffff;
+                    & 0xffffffff;
             cmd_struct->db_MSB_0 = DmaCtrl[tid].DescSt[head_idx].page_phy_addr
-                                                                        >> 32;
+                    >> 32;
         }
     } else {
         DmaCtrl[tid].DescSt[head_idx].req_type = req_type;
         DmaCtrl[tid].DescSt[head_idx].valid = 0;
 
         Desc_trck[tid][desc_idx[tid]].DescSt_ptr =
-                                             &(DmaCtrl[tid].DescSt[head_idx]);
+                &(DmaCtrl[tid].DescSt[head_idx]);
         Desc_trck[tid][desc_idx[tid]].is_used = TRACK_IDX_USED;
         mutex_unlock(&DmaCtrl[tid].DescSt[head_idx].available);
         return 0;
@@ -340,7 +365,7 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
 
     if (req_type != END_DESC) {
         memcpy(DmaCtrl[tid].DescSt[head_idx].ptr, &desc,
-                                                    sizeof (nand_descriptor));
+                sizeof (nand_descriptor));
     }
 
     DmaCtrl[tid].DescSt[head_idx].req_ptr = req_ptr;
@@ -368,8 +393,8 @@ RESET:
     if (req_type == OTHERS)
         return -1;
 
-    log_info ("[dfc_nand WARNING: Reseting channels...]\n");
-    reset_all ();
+    log_info("[dfc_nand WARNING: Reseting channels...]\n");
+    reset_all();
 
     return -1;
 }
@@ -381,18 +406,15 @@ void *io_completer() {
     uint8_t io_st, tbl = 0;
     int err, ret = 0, i;
     uint32_t intr_enable = 1;
-    uint64_t desc_tbl = 0, j = 0;
+    uint64_t desc_tbl;
     uint64_t desc_idx[DESC_PER_TBL];
-    uint32_t tail_idx = 0, csf_val = 0;
+    uint32_t csf_val = 0;
 
     int seln, fd, configfd, count, nb;
     fd_set readfds;
     unsigned char command_high;
     static struct timeval def_time = {0, 100};
     static struct timeval timeout = {0, 100};
-
-    for (i = 0; i < TBL_COUNT; i++)
-        desc_idx[i] = 0;
 
 #ifdef INTR
     fd = open("/dev/uio1", O_RDWR);
@@ -401,6 +423,13 @@ void *io_completer() {
     }
     FD_ZERO(&readfds);
 #endif
+
+RESET:
+    desc_tbl = 0;
+    for (i = 0; i < TBL_COUNT; i++)
+        desc_idx[i] = 0;
+    comp_reset = 0;
+    usleep (1);
 
     while (!nand_running) {
 #ifdef INTR
@@ -420,9 +449,12 @@ WAIT_INT:
             read(fd, &count, sizeof (uint32_t));
         }
 #endif
+
         while (!nand_running) {
             do {
 NEXT_CH:
+                if (reset_delay)
+                    goto RESET;
                 if (nand_running)
                     goto OUT;
 
@@ -444,6 +476,8 @@ NEXT_CH:
             } while (1);
 
             do {
+                if (reset_delay)
+                    goto RESET;
                 if (nand_running)
                     goto OUT;
 
@@ -454,7 +488,7 @@ NEXT_CH:
                     break;
                 }
                 mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                        DescSt_ptr->available));
+                                                       DescSt_ptr->available));
 #ifdef INTR
                 if (desc_tbl == TBL_COUNT - 1) {
                     desc_tbl = 0;
@@ -469,16 +503,23 @@ NEXT_CH:
             } while (1);
 
             if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].DescSt_ptr->req_type
-                                                                == END_DESC) {
+                    == END_DESC) {
+                mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
+                                                       DescSt_ptr->available));
                 return 0;
             }
 
             do {
+                if (reset_delay || nand_running)
+                    mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
+                                                       DescSt_ptr->available));
+                if (reset_delay)
+                    goto RESET;
                 if (nand_running)
                     goto OUT;
 
                 csf = (csf_reg *) ((uint32_t*) (Desc_trck[desc_tbl]
-                                   [desc_idx[desc_tbl]].DescSt_ptr->ptr) + 15);
+                        [desc_idx[desc_tbl]].DescSt_ptr->ptr) + 15);
                 csf_val = *((uint32_t *) csf);
                 csf = (csf_reg *) & csf_val;
                 if (!csf->OwnedByFpga) {
@@ -486,7 +527,7 @@ NEXT_CH:
                 }
 #ifdef INTR
                 mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                       DescSt_ptr->available));
+                        DescSt_ptr->available));
                 if (desc_tbl == TBL_COUNT - 1) {
                     desc_tbl = 0;
                     goto WAIT_INT;
@@ -498,49 +539,45 @@ NEXT_CH:
                 usleep(1);
 #endif
             } while (1);
-            memcpy(csf_bak, csf, sizeof (csf_reg));
 
+            memcpy(csf_bak, csf, sizeof (csf_reg));
             if (csf_bak->dma_cmp) {
                 io_st = 0;
                 if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                        DescSt_ptr->req_ptr) {
+                        DescSt_ptr->req_ptr) {
                     cmd = Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                            DescSt_ptr->req_ptr;
+                            DescSt_ptr->req_ptr;
                     if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                            DescSt_ptr->req_type == READ_STS) {
+                            DescSt_ptr->req_type == READ_STS) {
                         (*(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                    DescSt_ptr->page_virt_addr)
-                               == 0xE0) ? (cmd->status = 1) : (cmd->status = 0);
+                                DescSt_ptr->page_virt_addr)
+                                == 0xE0) ? (cmd->status = 1) : (cmd->status = 0);
                     } else {
                         cmd->status = 1;
                     }
+
                     dfcnand_callback(cmd);
                 }
-                Desc_trck[desc_tbl][desc_idx[desc_tbl]].is_used =TRACK_IDX_FREE;
-                Desc_trck[desc_tbl][desc_idx[desc_tbl]].DescSt_ptr->valid = 1;
-                mutex_unlock(&Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                        DescSt_ptr->available);
-                CIRC_INCR(desc_idx[desc_tbl], DESC_PER_TBL);
             } else {
                 cmd = Desc_trck[desc_tbl][desc_idx[desc_tbl]].
                                                            DescSt_ptr->req_ptr;
-                if (cmd) {
-                    err = csr[cmd->chip]->err_code;
-                    if (err == 1 || err == 2) {
-                        io_st = 1;
-                    }
+                if (cmd) {;
+                    err = csr[desc_tbl]->err_code;
+                    log_info("[dfc_nand: FPGA IO error. Error code: %d]\n",err);
+
+                    cmd->status = (err) ? 0 : 1;
+
+                    dfcnand_callback(cmd);
                 }
-                mutex_unlock(&Desc_trck[desc_tbl][desc_idx[desc_tbl]].
+            }
+
+            Desc_trck[desc_tbl][desc_idx[desc_tbl]].is_used = TRACK_IDX_FREE;
+            Desc_trck[desc_tbl][desc_idx[desc_tbl]].DescSt_ptr->valid = 1;
+
+            mutex_unlock(&Desc_trck[desc_tbl][desc_idx[desc_tbl]].
                                                         DescSt_ptr->available);
-            }
-            if (io_st) {
-                reset_dma_descriptors();
-                for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
-                    csr[tbl]->reset = 1;
-                    csr[tbl]->reset = 0;
-                }
-                first_dma = 0;
-            }
+
+            CIRC_INCR(desc_idx[desc_tbl], DESC_PER_TBL);
 
             if (desc_tbl == TBL_COUNT - 1)
                 desc_tbl = 0;
@@ -549,6 +586,7 @@ NEXT_CH:
         }
     }
 OUT:
+    close (fd);
     return NULL;
 }
 
@@ -568,7 +606,7 @@ uint8_t read_mem_addr() {
     }
 
     memset(&buf, 0, sizeof (uint64_t)*70);
-    ret = read(fd, (struct ad_trans *) &buf, sizeof(unsigned long long int)*70);
+    ret = read(fd, (struct ad_trans *) &buf, sizeof (unsigned long long int)*70);
     if (ret == -1) {
         perror("read");
         return FAILURE;
@@ -594,7 +632,7 @@ uint8_t virt_map() {
     }
     for (i = 0; i < 70; i++) {
         virt_addr[i] = (uint8_t*) mmap(0, 1024 * getpagesize(),
-                         PROT_READ | PROT_WRITE, MAP_SHARED, fd, phy_addr[i]);
+                PROT_READ | PROT_WRITE, MAP_SHARED, fd, phy_addr[i]);
         if (virt_addr[i] == (uint8_t *) MAP_FAILED) {
             perror("oob_map");
             close(fd);
@@ -615,54 +653,15 @@ uint8_t virt_unmap() {
     return SUCCESS;
 }
 
-static void setup_nand_desc_array() {
-    int i = 0, j, k = 0;
-    uint8_t *dma_table;
-
-    for (j = 0; j < CHIP_COUNT; j++) {
-        /*table = desc_tbl_addr + (j * TABLE_SHIFT)+0x10000;*/
-        dma_table = table[j];
-        for (i = 0; i < DESC_PER_TBL; i++) {
-            DmaCtrl[j].DescSt[i].ptr = dma_table + (i * DESC_SIZE);
-            DmaCtrl[j].DescSt[i].valid = 1;
-            DmaCtrl[j].DescSt[i].page_phy_addr = phy_addr[0]+(k * 4096);
-            DmaCtrl[j].DescSt[i].page_virt_addr = virt_addr[0] + (k * 4096);
-            mutex_init(&DmaCtrl[j].DescSt[i].available, NULL);
-            k++;
-        }
-    }
-}
-
-void dma_default(void) {
-    uint8_t tbl;
-
-    for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
-        DmaCtrl[tbl].head_idx = 0;
-        DmaCtrl[tbl].tail_idx = 0;
-
-        /*table_sz[tbl]->table_size = DESC_PER_TBL;*/
-        table_sz[tbl]->table_size = 0x10;
-
-        csr[tbl]->reset = 1;
-        csr[tbl]->reset = 0;
-
-         desc_idx[tbl] = 0;
-         desc_retry[tbl] = 0;
-    }
-    reset_delay = 0;
-
-    setup_nand_desc_array();
-}
-
 void init_dma_mgr() {
     int i = 0;
     uint32_t total_desc = 0;
     /*Based on Fpga Image version, DMA Table Offsets has been modified*/
     if ((fpga_version == 0x00030100) || (fpga_version == 0x00030004)) {
         for (i = 0; i < CHIP_COUNT; i++) {
-            csr[i] = (csr_reg *) (ctrl_reg_addr + (i * NAND_CSR_OFFSET)+0x1000);
+            csr[i] = (csr_reg *) (ctrl_reg_addr + (i * NAND_CSR_OFFSET) + 0x1000);
             table_sz[i] = (tblsz_reg *) (ctrl_reg_addr +
-                                (i * NAND_CSR_OFFSET) + TBL_SZ_SHIFT + 0x1000);
+                    (i * NAND_CSR_OFFSET) + TBL_SZ_SHIFT + 0x1000);
             table[i] = desc_tbl_addr + (i * NAND_TBL_OFFSET) + 0x10000;
             nand_gpio_int = ctrl_reg_addr + 0x4001;
         }
@@ -670,12 +669,13 @@ void init_dma_mgr() {
         for (i = 0; i < CHIP_COUNT; i++) {
             csr[i] = (csr_reg *) (ctrl_reg_addr + (i * NAND_CSR_OFFSET));
             table_sz[i] = (tblsz_reg *) (ctrl_reg_addr +
-                                        (i * NAND_CSR_OFFSET) + TBL_SZ_SHIFT);
+                    (i * NAND_CSR_OFFSET) + TBL_SZ_SHIFT);
             table[i] = desc_tbl_addr + (i * NAND_TBL_OFFSET);
             nand_gpio_int = ctrl_reg_addr + 0x4001;
         }
     }
-    dma_default();
+
+    reset_all();
 }
 
 int mmap_fpga_regs(int mem_fd, uint64_t bar2_addr, uint64_t bar4_addr) {
@@ -688,7 +688,7 @@ int mmap_fpga_regs(int mem_fd, uint64_t bar2_addr, uint64_t bar4_addr) {
         size[1] = 8;
     }
     desc_tbl_addr = mmap(0, size[0] * getpagesize(), PROT_READ |
-                                    PROT_WRITE, MAP_SHARED, mem_fd, bar2_addr);
+            PROT_WRITE, MAP_SHARED, mem_fd, bar2_addr);
     if (desc_tbl_addr == MAP_FAILED) {
         perror("mmap:");
         ret = errno;
@@ -696,7 +696,7 @@ int mmap_fpga_regs(int mem_fd, uint64_t bar2_addr, uint64_t bar4_addr) {
 
 
     ctrl_reg_addr = (uint32_t*) mmap(0, size[1] * getpagesize(),
-                        PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, bar4_addr);
+            PROT_READ | PROT_WRITE, MAP_SHARED, mem_fd, bar4_addr);
     if (ctrl_reg_addr == MAP_FAILED) {
         perror("mmap:");
         ret = errno;
@@ -746,7 +746,7 @@ uint8_t read_bar_address() {
         }
     }
     ver_reg = (uint32_t*) mmap(0, getpagesize(), PROT_READ |
-                                PROT_WRITE, MAP_SHARED, fd, bar_address[0][5]);
+            PROT_WRITE, MAP_SHARED, fd, bar_address[0][5]);
     if (ver_reg == MAP_FAILED) {
         perror("mmap:");
         ret = errno;
@@ -777,7 +777,7 @@ uint8_t nand_dm_init() {
     }
     ret = read_bar_address();
     if (ret) {
-        close (fd);
+        close(fd);
         return FAILURE;
     }
     /*Passing respective BAR address to do mmap based on FPGA image Version*/
@@ -795,10 +795,10 @@ uint8_t nand_dm_init() {
                 " Upgrade to 02.05.02 or 03.00.04 or 03.01.00 image version\n",
                 fpga_version & 0x00FF0000, fpga_version & 0x0000FF00,
                 fpga_version & 0x000000FF);
-        close (fd);
+        close(fd);
         return FAILURE;
     }
-    close (fd);
+    close(fd);
 
     if (ret) {
         perror("mmap failed:");
@@ -818,13 +818,14 @@ uint8_t nand_dm_init() {
 
     init_dma_mgr();
 
-    reset_all();
+    nand_running = 0;
+    if (pthread_create(&io_completion, NULL, (void *) io_completer, NULL) != 0)
+        log_err(" [mmgr: ERROR. nand completion thread not started.\n");
 
     /*Setting the feature to NAND_SYNC_MODE2 or ASYNC_MODE_5*/
     uint16_t cds_1[4] = {0, 0, 0, 0}, cds_2[4] = {0, 0, 0, 0},
-                                                        async[4] = {5, 0, 0, 0};
-    uint16_t en_odt[4] = {0x20, 0, 0, 0}, s_mode2[4] =
-                                {0x22, 0, 0, 0}, s_mode1[4] = {0x21, 0, 0, 0};
+    async[4] = {5, 0, 0, 0};
+    uint16_t en_odt[4] = {0x20, 0, 0, 0}, s_mode2[4] ={0x22, 0, 0, 0}, s_mode1[4] = {0x21, 0, 0, 0};
     if (fpga_version == 0x00030004) {
         ret = nand_set_feature(0x10, 0x4, &cds_1);
         ret += nand_set_feature(0x80, 0x4, &cds_2);
