@@ -223,7 +223,18 @@ static void dfcnand_process_cq (void *opaque)
 
 static void dfcnand_process_to (void **opaque, int counter)
 {
-    /* Nothing to do */
+    io_cmd *cmd;
+
+     while (counter) {
+        counter--;
+        cmd = (struct io_cmd *) opaque[counter];
+
+        if (cmd->dfc_io.local_dma &&
+                                !(nand_mq->config->flags & OX_MQ_TO_COMPLETE))
+            dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
+
+        cmd->status = 0; /* failed FPGA status */
+    }
 }
 
 static int dfcnand_start_mq (void)

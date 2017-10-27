@@ -15,7 +15,7 @@
 #include "../../include/ssd.h"
 #include "fpga_3_01_00/nand_dma.h"
 
-#define RESET_TIMEOUT 200000
+#define RESET_TIMEOUT 100000
 
 static uint32_t desc_idx[TBL_COUNT];
 static uint32_t desc_retry[TBL_COUNT];
@@ -34,7 +34,7 @@ uint32_t *nand_gpio_int = NULL;
 uint64_t bar_address[2][6];
 int fpga_version = 0, size[2];
 
-static pthread_mutex_t m_desc_mutex;
+static pthread_mutex_t reset_mutex;
 static uint8_t nand_running; /* stop completion thread */
 static uint8_t reset_delay; /* delay threads during reset */
 static uint8_t comp_reset; /* notify that completion thread is idle for reset */
@@ -94,9 +94,7 @@ int nand_page_prog(io_cmd *cmd_buf) {
         }
 
     }
-    make_desc(cmd_struct, cmd_buf->chip, WRITE, cmd_buf);
-
-    return SUCCESS;
+    return make_desc(cmd_struct, cmd_buf->chip, WRITE, cmd_buf);
 }
 
 int nand_page_read(io_cmd *cmd_buf) {
@@ -121,9 +119,7 @@ int nand_page_read(io_cmd *cmd_buf) {
             ((cmd_buf->host_addr[4] >> 32) & 0xfffff);
     cmd_struct->control_fields = PAGE_READ << 5 | cmd_buf->dfc_io.rdy_bsy | 1;
 
-    make_desc(cmd_struct, cmd_buf->chip, READ_IO, cmd_buf);
-
-    return SUCCESS;
+    return make_desc(cmd_struct, cmd_buf->chip, READ_IO, cmd_buf);
 }
 
 int nand_block_erase(io_cmd *cmd_buf) {
@@ -147,9 +143,7 @@ int nand_block_erase(io_cmd *cmd_buf) {
     cmd_struct->len1_len0 = 0x2;
     cmd_struct->control_fields = READ_STATUS << 5 |
             cmd_buf->dfc_io.rdy_bsy | 1 << 2 | 1;
-    make_desc(cmd_struct, cmd_buf->chip, READ_STS, cmd_buf);
-
-    return SUCCESS;
+    return make_desc(cmd_struct, cmd_buf->chip, READ_STS, cmd_buf);
 }
 
 int nand_reset() {
@@ -210,10 +204,19 @@ static void setup_nand_desc_array() {
             DmaCtrl[j].DescSt[i].valid = 1;
             DmaCtrl[j].DescSt[i].page_phy_addr = phy_addr[0]+(k * 4096);
             DmaCtrl[j].DescSt[i].page_virt_addr = virt_addr[0] + (k * 4096);
-            mutex_init(&DmaCtrl[j].DescSt[i].available, NULL);
+            if (!io_completion)
+                mutex_init(&DmaCtrl[j].DescSt[i].available, NULL);
             k++;
         }
     }
+}
+
+static void destroy_nand_desc_array() {
+    int j, i;
+
+    for (j = 0; j < CHIP_COUNT; j++)
+        for (i = 0; i < DESC_PER_TBL; i++)
+            mutex_destroy(&DmaCtrl[j].DescSt[i].available);
 }
 
 static inline void reset_dma_descriptors(void) {
@@ -232,14 +235,18 @@ static inline void reset_dma_descriptors(void) {
 static void reset_all() {
     int tbl, index;
 
+    mutex_lock(&reset_mutex);
+    if (reset_delay) {
+        mutex_unlock(&reset_mutex);
+        return;
+    } else
+        reset_delay = 1;
+    mutex_unlock(&reset_mutex);
+
     comp_reset = 1;
-    reset_delay = 1;
 
     while (comp_reset && io_completion)
         usleep (1);
-
-    setup_nand_desc_array();
-    reset_dma_descriptors();
 
     for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
         DmaCtrl[tbl].head_idx = 0;
@@ -255,10 +262,27 @@ static void reset_all() {
             memset (&Desc_trck[tbl][index], 0x0, sizeof (Desc_Track));
     }
 
+    setup_nand_desc_array();
+    reset_dma_descriptors();
+
     first_dma = 0;
 
     usleep(1000);
-    nand_reset();
+
+    for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
+        csr[tbl]->reset = 1;
+        csr[tbl]->reset = 0;
+    }
+
+    usleep(1000);
+    for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
+        csr[tbl]->start = 1;
+        csr[tbl]->loop = 1;
+    }
+
+    if (!io_completion)
+        nand_reset();
+
     usleep(1000);
 
     reset_delay = 0;
@@ -266,22 +290,14 @@ static void reset_all() {
 }
 
 uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
-        void *req_ptr) {
-    uint8_t i, tbl = 0, fdma = 0;
+                                                               void *req_ptr) {
+    uint8_t i = 0, tbl = 0;
     nand_descriptor desc;
     uint16_t head_idx;
+    DescStat *dStat;
 
     if (reset_delay && req_type != OTHERS)
         return -1;
-
-    if (first_dma == 0) {
-        first_dma++;
-        fdma++;
-        for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
-            csr[tbl]->reset = 1;
-            csr[tbl]->reset = 0;
-        }
-    }
 
     desc_retry[tid] = 0;
 
@@ -291,9 +307,9 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
         else if (desc_retry[tid] >= RESET_TIMEOUT)
             goto RESET;
 
-        if (Desc_trck[tid][desc_idx[tid]].is_used == TRACK_IDX_FREE) {
+        if (Desc_trck[tid][desc_idx[tid]].is_used == TRACK_IDX_FREE)
             break;
-        }
+
         desc_retry[tid]++;
         usleep(1);
     } while (1);
@@ -307,32 +323,32 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
             goto RESET;
 
         head_idx = DmaCtrl[tid].head_idx;
-        mutex_lock(&DmaCtrl[tid].DescSt[head_idx].available);
-        if (DmaCtrl[tid].DescSt[head_idx].valid) {
+        dStat = &DmaCtrl[tid].DescSt[head_idx];
+
+        mutex_lock(&dStat->available);
+        if (dStat->valid)
             break;
-        }
-        mutex_unlock(&DmaCtrl[tid].DescSt[head_idx].available);
+        mutex_unlock(&dStat->available);
+
         desc_retry[tid]++;
         usleep(1);
     } while (1);
 
     if (cmd_struct) {
         if (req_type == READ_STS) {
-            cmd_struct->db_LSB_0 = DmaCtrl[tid].DescSt[head_idx].page_phy_addr
-                    & 0xffffffff;
-            cmd_struct->db_MSB_0 = DmaCtrl[tid].DescSt[head_idx].page_phy_addr
-                    >> 32;
+            cmd_struct->db_LSB_0 = dStat->page_phy_addr & 0xffffffff;
+            cmd_struct->db_MSB_0 = dStat->page_phy_addr >> 32;
         }
     } else {
-        DmaCtrl[tid].DescSt[head_idx].req_type = req_type;
-        DmaCtrl[tid].DescSt[head_idx].valid = 0;
+        dStat->req_type = req_type;
+        dStat->valid = 0;
 
-        Desc_trck[tid][desc_idx[tid]].DescSt_ptr =
-                &(DmaCtrl[tid].DescSt[head_idx]);
+        Desc_trck[tid][desc_idx[tid]].DescSt_ptr = dStat;
         Desc_trck[tid][desc_idx[tid]].is_used = TRACK_IDX_USED;
-        mutex_unlock(&DmaCtrl[tid].DescSt[head_idx].available);
+        mutex_unlock(&dStat->available);
         return 0;
     }
+
     memset(&desc, 0, sizeof (nand_descriptor));
     desc.row_addr = cmd_struct->row_addr;
     desc.column_addr = cmd_struct->trgt_col_addr & 0x1fffffff;
@@ -363,26 +379,17 @@ uint8_t make_desc(nand_cmd_struct *cmd_struct, uint8_t tid, uint8_t req_type,
     desc.desc_id = head_idx + 1;
     desc.OwnedByfpga = 1;
 
-    if (req_type != END_DESC) {
-        memcpy(DmaCtrl[tid].DescSt[head_idx].ptr, &desc,
-                sizeof (nand_descriptor));
-    }
+    if (req_type != END_DESC)
+        memcpy(dStat->ptr, &desc, sizeof (nand_descriptor));
 
-    DmaCtrl[tid].DescSt[head_idx].req_ptr = req_ptr;
-    DmaCtrl[tid].DescSt[head_idx].req_type = req_type;
-    DmaCtrl[tid].DescSt[head_idx].valid = 0;
-
-    if (fdma) {
-        for (tbl = 0; tbl < CHIP_COUNT; tbl++) {
-            csr[tbl]->start = 1;
-            csr[tbl]->loop = 1;
-        }
-    }
-    DmaCtrl[tid].DescSt[head_idx].idx = head_idx;
-    Desc_trck[tid][desc_idx[tid]].DescSt_ptr = &(DmaCtrl[tid].DescSt[head_idx]);
+    dStat->req_ptr = req_ptr;
+    dStat->req_type = req_type;
+    dStat->valid = 0;
+    dStat->idx = head_idx;
+    Desc_trck[tid][desc_idx[tid]].DescSt_ptr = dStat;
     Desc_trck[tid][desc_idx[tid]].is_used = TRACK_IDX_USED;
 
-    mutex_unlock(&DmaCtrl[tid].DescSt[head_idx].available);
+    mutex_unlock(&dStat->available);
 
     CIRC_INCR(desc_idx[tid], DESC_PER_TBL);
     CIRC_INCR(DmaCtrl[tid].head_idx, DESC_PER_TBL);
@@ -400,33 +407,32 @@ RESET:
 }
 
 void *io_completer() {
-    csf_reg *csf;
-    csf_reg *csf_bak = malloc(sizeof (csf_reg));
-    io_cmd *cmd;
-    uint8_t io_st, tbl = 0;
-    int err, ret = 0, i;
-    uint32_t intr_enable = 1;
-    uint64_t desc_tbl;
-    uint64_t desc_idx[DESC_PER_TBL];
-    uint32_t csf_val = 0;
+    csf_reg    *csf, *csf_bak;
+    io_cmd     *cmd;
+    Desc_Track *trk;
+    fd_set     readfds;
+    uint8_t    tbl = 0;
+    uint32_t   intr_enable = 1, csf_val = 0;
+    uint64_t   desc_tbl;
+    uint64_t   desc_idx[CHIP_COUNT];
+    int        seln, fd, count, nb, err, ret = 0, i;
 
-    int seln, fd, configfd, count, nb;
-    fd_set readfds;
     unsigned char command_high;
     static struct timeval def_time = {0, 100};
     static struct timeval timeout = {0, 100};
 
+    csf_bak = malloc(sizeof (csf_reg));
+
 #ifdef INTR
     fd = open("/dev/uio1", O_RDWR);
-    if (fd < 0) {
+    if (fd < 0)
         perror("open uio1");
-    }
     FD_ZERO(&readfds);
 #endif
 
 RESET:
     desc_tbl = 0;
-    for (i = 0; i < TBL_COUNT; i++)
+    for (i = 0; i < CHIP_COUNT; i++)
         desc_idx[i] = 0;
     comp_reset = 0;
     usleep (1);
@@ -434,6 +440,7 @@ RESET:
     while (!nand_running) {
 #ifdef INTR
         timeout = def_time;
+
 WAIT_INT:
         FD_SET(fd, &readfds);
         nb = write(fd, &intr_enable, sizeof (intr_enable));
@@ -445,12 +452,12 @@ WAIT_INT:
         *(nand_gpio_int) = *(nand_gpio_int) & (~(0x4));
 
         seln = select(fd + 1, &readfds, NULL, NULL, &timeout);
-        if (seln > 0 && FD_ISSET(fd, &readfds)) {
+        if (seln > 0 && FD_ISSET(fd, &readfds))
             read(fd, &count, sizeof (uint32_t));
-        }
 #endif
 
         while (!nand_running) {
+            /* Step 1: Check if descriptor tracker is used */
             do {
 NEXT_CH:
                 if (reset_delay)
@@ -458,134 +465,121 @@ NEXT_CH:
                 if (nand_running)
                     goto OUT;
 
-                if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].is_used ==
-                                                              TRACK_IDX_USED) {
+                trk = &Desc_trck[desc_tbl][desc_idx[desc_tbl]];
+
+                if (trk->is_used == TRACK_IDX_USED)
                     break;
-                }
 #ifdef INTR
-                if (desc_tbl == TBL_COUNT - 1) {
-                    desc_tbl = 0;
+                CIRC_INCR(desc_tbl, CHIP_COUNT);
+                if (!desc_tbl)
                     goto WAIT_INT;
-                } else {
-                    desc_tbl++;
+                else
                     goto NEXT_CH;
-                }
 #else
                 usleep(1);
 #endif
             } while (1);
 
+            /* Step 2: Check is descriptor status is not valid */
             do {
                 if (reset_delay)
                     goto RESET;
                 if (nand_running)
                     goto OUT;
 
-                mutex_lock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                       DescSt_ptr->available));
-                if (!Desc_trck[desc_tbl][desc_idx[desc_tbl]]
-                                                          .DescSt_ptr->valid) {
+                mutex_lock(&(trk->DescSt_ptr->available));
+
+                if (!trk->DescSt_ptr->valid)
                     break;
-                }
-                mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                       DescSt_ptr->available));
+
+                mutex_unlock(&(trk->DescSt_ptr->available));
 #ifdef INTR
-                if (desc_tbl == TBL_COUNT - 1) {
-                    desc_tbl = 0;
+                CIRC_INCR(desc_tbl, CHIP_COUNT);
+                if (!desc_tbl)
                     goto WAIT_INT;
-                } else {
-                    desc_tbl++;
+                else
                     goto NEXT_CH;
-                }
 #else
                 usleep(1);
 #endif
             } while (1);
 
-            if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].DescSt_ptr->req_type
-                    == END_DESC) {
-                mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                       DescSt_ptr->available));
+            if (trk->DescSt_ptr->req_type == END_DESC) {
+                mutex_unlock(&(trk->DescSt_ptr->available));
                 return 0;
             }
 
+            /* Step 3: Check if descriptor is not owned by FPGA */
             do {
                 if (reset_delay || nand_running)
-                    mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                       DescSt_ptr->available));
+                    mutex_unlock(&(trk->DescSt_ptr->available));
+
                 if (reset_delay)
                     goto RESET;
                 if (nand_running)
                     goto OUT;
 
-                csf = (csf_reg *) ((uint32_t*) (Desc_trck[desc_tbl]
-                        [desc_idx[desc_tbl]].DescSt_ptr->ptr) + 15);
+                csf = (csf_reg *) ((uint32_t*) (trk->DescSt_ptr->ptr) + 15);
+
+                /* copy the register value to LS2 memory */
                 csf_val = *((uint32_t *) csf);
-                csf = (csf_reg *) & csf_val;
-                if (!csf->OwnedByFpga) {
+                csf = (csf_reg *) &csf_val;
+
+                if (!csf->OwnedByFpga)
                     break;
-                }
+
+                mutex_unlock(&(trk->DescSt_ptr->available));
 #ifdef INTR
-                mutex_unlock(&(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                        DescSt_ptr->available));
-                if (desc_tbl == TBL_COUNT - 1) {
-                    desc_tbl = 0;
+                CIRC_INCR(desc_tbl, CHIP_COUNT);
+                if (!desc_tbl)
                     goto WAIT_INT;
-                } else {
-                    desc_tbl++;
+                else
                     goto NEXT_CH;
-                }
 #else
                 usleep(1);
 #endif
             } while (1);
 
+            /* Step 4: Complete command. Set status to valid, tracker to free*/
             memcpy(csf_bak, csf, sizeof (csf_reg));
             if (csf_bak->dma_cmp) {
-                io_st = 0;
-                if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                        DescSt_ptr->req_ptr) {
-                    cmd = Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                            DescSt_ptr->req_ptr;
-                    if (Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                            DescSt_ptr->req_type == READ_STS) {
-                        (*(Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                DescSt_ptr->page_virt_addr)
-                                == 0xE0) ? (cmd->status = 1) : (cmd->status = 0);
-                    } else {
+
+                if (trk->DescSt_ptr->req_ptr) {
+                    cmd = trk->DescSt_ptr->req_ptr;
+
+                    if (trk->DescSt_ptr->req_type == READ_STS)
+                        (*(trk->DescSt_ptr->page_virt_addr) == 0xE0) ?
+                                                            (cmd->status = 1) :
+                                                            (cmd->status = 0);
+                    else
                         cmd->status = 1;
-                    }
 
                     dfcnand_callback(cmd);
                 }
+
             } else {
-                cmd = Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                           DescSt_ptr->req_ptr;
+                cmd = trk->DescSt_ptr->req_ptr;
                 if (cmd) {;
                     err = csr[desc_tbl]->err_code;
                     log_info("[dfc_nand: FPGA IO error. Error code: %d]\n",err);
 
-                    cmd->status = (err) ? 0 : 1;
+                    cmd->status = (err == 1 || err == 2) ? 0 : 1;
 
                     dfcnand_callback(cmd);
                 }
             }
 
-            Desc_trck[desc_tbl][desc_idx[desc_tbl]].is_used = TRACK_IDX_FREE;
-            Desc_trck[desc_tbl][desc_idx[desc_tbl]].DescSt_ptr->valid = 1;
+            trk->is_used = TRACK_IDX_FREE;
+            trk->DescSt_ptr->valid = 1;
 
-            mutex_unlock(&Desc_trck[desc_tbl][desc_idx[desc_tbl]].
-                                                        DescSt_ptr->available);
+            mutex_unlock(&trk->DescSt_ptr->available);
 
             CIRC_INCR(desc_idx[desc_tbl], DESC_PER_TBL);
-
-            if (desc_tbl == TBL_COUNT - 1)
-                desc_tbl = 0;
-            else
-                desc_tbl++;
+            CIRC_INCR(desc_tbl, CHIP_COUNT);
         }
     }
 OUT:
+    free (csf_bak);
     close (fd);
     return NULL;
 }
@@ -816,6 +810,8 @@ uint8_t nand_dm_init() {
         return FAILURE;
     }
 
+    mutex_init(&reset_mutex, NULL);
+
     init_dma_mgr();
 
     nand_running = 0;
@@ -852,5 +848,7 @@ uint8_t nand_dm_deinit() {
     virt_unmap();
     munmap(desc_tbl_addr, size[0] * getpagesize());
     munmap(ctrl_reg_addr, size[1] * getpagesize());
+    destroy_nand_desc_array();
+    mutex_destroy(&reset_mutex);
     return SUCCESS;
 }

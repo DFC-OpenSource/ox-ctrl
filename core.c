@@ -203,7 +203,7 @@ static void nvm_ftl_process_to (void **opaque, int counter)
         counter--;
         cmd = (struct nvm_io_cmd *) opaque[counter];
         cmd->status.status = NVM_IO_FAIL;
-        cmd->status.nvme_status = NVME_CMD_ABORT_REQ;
+        cmd->status.nvme_status = NVME_MEDIA_TIMEOUT;
     }
 }
 
