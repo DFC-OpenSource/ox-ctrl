@@ -189,7 +189,7 @@ typedef struct csr_reg {
 } csr_reg;
 
 typedef struct DmaControl {
-    DescStat DescSt[64];
+    DescStat DescSt[8];
     uint16_t head_idx;
     uint16_t tail_idx;
 } Dma_Control;

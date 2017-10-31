@@ -48,6 +48,17 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include "uatomic.h"
+#include "lightnvm.h"
+
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
+#define VERSION     CONFIG_VERSION
+#define PATCH       CONFIG_PATCHLEVEL
+#define SUBLEVEL    CONFIG_SUBLEVEL
+#define LABEL       CONFIG_LABEL
+#define OX_VER      STR(VERSION) "." STR(PATCH) "." STR(SUBLEVEL)
+#define OX_LABEL    OX_VER "-" LABEL
 
 #define MAX_NAME_SIZE           31
 #define NVM_QUEUE_RETRY         16
@@ -60,9 +71,12 @@
 #define NVM_SYNCIO_FLAG_SYNC   0x2
 #define NVM_SYNCIO_FLAG_DEC    0x4
 
+#define NVM_FULL_UPDOWN        0x1
+#define NVM_RESTART            0x0
+
 /* All media managers must accept page r/w of NVM_PG_SIZE + OOB_SIZE*/
 #define NVM_PG_SIZE            0x4000
-#define NVM_OOB_BITS           10
+#define NVM_OOB_BITS           6
 #define NVM_OOB_SIZE           (1 << NVM_OOB_BITS)
 
 #define AND64                  0xffffffffffffffff
@@ -86,12 +100,13 @@ struct nvm_ppa_addr {
     /* Generic structure for all addresses */
     union {
         struct {
-            uint64_t blk    : 16;
-            uint64_t pg     : 16;
-            uint64_t sec    : 8;
-            uint64_t pl     : 8;
-            uint64_t lun    : 8;
-            uint64_t ch     : 8;
+            uint64_t sec    : LNVM_SEC_BITS;
+            uint64_t pl     : LNVM_PL_BITS;
+            uint64_t ch     : LNVM_CH_BITS;
+            uint64_t lun    : LNVM_LUN_BITS;
+            uint64_t pg     : LNVM_PG_BITS;
+            uint64_t blk    : LNVM_BLK_BITS;
+            uint64_t rsv    : LNVM_RSV_BITS;
         } g;
 
         uint64_t ppa;
@@ -121,6 +136,7 @@ struct nvm_io_status {
 struct nvm_mmgr_io_cmd {
     struct nvm_io_cmd       *nvm_io;
     struct nvm_ppa_addr     ppa;
+    struct nvm_channel      *ch;
     uint64_t                prp[32]; /* max of 32 sectors */
     uint64_t                md_prp;
     uint8_t                 status;
@@ -130,6 +146,7 @@ struct nvm_mmgr_io_cmd {
     uint16_t                n_sectors;
     uint32_t                sec_sz;
     uint32_t                md_sz;
+    uint16_t                sec_offset; /* first sector in the ppa vector */
     atomic_t                *sync_count;
     pthread_mutex_t         *sync_mutex;
     struct timeval          tstart;
@@ -141,7 +158,7 @@ struct nvm_mmgr_io_cmd {
 
 struct nvm_io_cmd {
     uint64_t                    cid;
-    struct nvm_channel          *channel;
+    struct nvm_channel          *channel[64];
     struct nvm_ppa_addr         ppalist[64];
     struct nvm_io_status        status;
     struct nvm_mmgr_io_cmd      mmgr_io[64];
@@ -154,9 +171,6 @@ struct nvm_io_cmd {
     uint32_t                    n_sec;
     uint64_t                    slba;
     uint8_t                     cmdtype;
-    /* if the plane_page is not full, sec_offset means the number sectors
-     *                                                      to be transfered */
-    uint16_t                    sec_offset;
 };
 
 #include "nvme.h"
@@ -250,11 +264,13 @@ struct nvm_mmgr {
 typedef void        (nvm_pcie_isr_notify)(void *);
 typedef void        (nvm_pcie_exit)(void);
 typedef void        *(nvm_pcie_nvme_consumer) (void *);
+typedef void        (nvm_pcie_reset) (void);
 
 struct nvm_pcie_ops {
     nvm_pcie_nvme_consumer  *nvme_consumer;
     nvm_pcie_isr_notify     *isr_notify; /* notify host about completion */
     nvm_pcie_exit           *exit;
+    nvm_pcie_reset          *reset;
 };
 
 struct nvm_pcie {
@@ -313,6 +329,7 @@ struct nvm_ftl {
     uint16_t                bbtbl_format;
     uint8_t                 nq; /* Number of queues/threads, up to 64 per FTL */
     struct ox_mq            *mq;
+    uint16_t                next_queue;
     LIST_ENTRY(nvm_ftl)     entry;
 };
 
@@ -415,6 +432,7 @@ struct core_struct {
 };
 
 /* core functions */
+int  nvm_restart ();
 int  nvm_register_mmgr(struct nvm_mmgr *);
 int  nvm_register_pcie_handler(struct nvm_pcie *);
 int  nvm_register_ftl (struct nvm_ftl *);
@@ -424,6 +442,7 @@ void nvm_complete_ftl (struct nvm_io_cmd *);
 void nvm_callback (struct nvm_mmgr_io_cmd *);
 int  nvm_dma (void *, uint64_t, ssize_t, uint8_t);
 int  nvm_memcheck (void *);
+int  nvm_contains_ppa (struct nvm_ppa_addr *, uint32_t, struct nvm_ppa_addr);
 int  nvm_ftl_cap_exec (uint8_t, void **, int);
 int  nvm_init_ctrl (int, char **);
 int  nvm_test_unit (struct nvm_init_arg *);

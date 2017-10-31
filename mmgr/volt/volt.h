@@ -17,9 +17,9 @@
 #define VOLT_PLANE_COUNT     2
 #define VOLT_PAGE_SIZE       0x4000
 #define VOLT_SECTOR_SIZE     0x1000
-#define VOLT_OOB_SIZE        0x400
+#define VOLT_OOB_SIZE        0x40
 
-#define VOLT_DMA_SLOT_CH     64
+#define VOLT_DMA_SLOT_CH     32
 #define VOLT_DMA_SLOT_INDEX  VOLT_DMA_SLOT_CH * VOLT_CHIP_COUNT
 #define VOLT_DMA_READ        0x1
 #define VOLT_DMA_WRITE       0x2

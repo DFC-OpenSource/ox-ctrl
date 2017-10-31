@@ -167,8 +167,7 @@ static int nvme_init_ctrl (NvmeCtrl *n)
     n->features.temp_thresh     = 0x14d;
     n->features.err_rec         = 0;
     n->features.volatile_wc     = n->id_ctrl.vwc;
-    n->features.num_queues      = (n->num_queues - 1) |
-		((n->num_queues - 1) << 16);
+    n->features.num_queues      = n->num_queues;
     n->features.int_coalescing  = n->intc_thresh | (n->intc_time << 8);
     n->features.write_atomicity = 0;
     n->features.async_config    = 0x0;
@@ -191,8 +190,8 @@ static int nvme_init_ctrl (NvmeCtrl *n)
 
     n->temperature = NVME_TEMPERATURE;
 
-    n->sq = calloc (1, sizeof (NvmeCQ)*((n->features.num_queues & 0xfffe) + 1));
-    n->cq = calloc (1, sizeof (NvmeSQ)*((n->features.num_queues >> 16) + 1));
+    n->sq = calloc (n->features.num_queues, sizeof (void *));
+    n->cq = calloc (n->features.num_queues, sizeof (void *));
     if (!n->sq || !n->cq)
         return EMEM;
 
@@ -580,7 +579,7 @@ void nvme_process_reg (NvmeCtrl *n, uint64_t offset, uint64_t data)
             } else if (!NVME_CC_EN(data) && \
 		NVME_CC_EN(n->nvme_regs.vBar.cc)) {
 		syslog(LOG_DEBUG,"[nvme: Nvme !EN]\n");
-		nvme_clear_ctrl(n);
+                nvm_restart ();
 		n->nvme_regs.vBar.cc = 0;
 		n->nvme_regs.vBar.csts &= ~NVME_CSTS_READY;
             }

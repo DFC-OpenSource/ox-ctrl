@@ -114,6 +114,7 @@ enum NvmeStatusCodes {
     NVME_E2E_REF_ERROR          = 0x0284,
     NVME_CMP_FAILURE            = 0x0285,
     NVME_ACCESS_DENIED          = 0x0286,
+    NVME_MEDIA_TIMEOUT          = 0x0287,
     NVME_MORE                   = 0x2000,
     NVME_DNR                    = 0x4000,
     NVME_NO_COMPLETE            = 0xffff,
@@ -1019,6 +1020,7 @@ typedef struct NvmeCtrl {
     NvmeFeatureVal  features;
     NvmeIdCtrl      id_ctrl;
     uint8_t         running;
+    uint8_t         stop;
     uint8_t         aer_mask;
     TAILQ_HEAD (ctrl_aerhead, NvmeAsyncEvent)   aer_queue;
     pthread_mutex_t                             qs_req_mutex;

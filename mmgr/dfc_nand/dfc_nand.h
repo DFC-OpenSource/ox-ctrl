@@ -7,7 +7,8 @@
 #define NAND_PAGE_COUNT         512
 #define NAND_SECTOR_COUNT       4
 #define NAND_SECTOR_SIZE	0x1000
-#define NAND_OOB_SIZE		0x0400
+#define NAND_OOB_SIZE		0x400
+#define NAND_EXPOSED_OOB        0x40
 
 /* We assume LUNs * TARGETs for total of LUNs */
 #define NAND_VIRTUAL_LUNS       4
@@ -19,6 +20,11 @@
 
 #define DFCNAND_RDY_BSY_ON      (1 << 3)
 #define DFCNAND_RDY_BSY_OFF     0x0
+
+#define DFCNAND_LS2_DMA_DATA   (1 << 0)
+#define DFCNAND_LS2_DMA_OOB    (1 << 1)
+
+#define DFCNAND_QUEUE_TO       200000
 
 enum DFCNAND_COMMAND_ID {
     DFCNAND_PAGE_PROG           = 0xA,
@@ -48,6 +54,7 @@ struct dfcnand_io {
     struct nvm_mmgr_io_cmd   *nvm_mmgr_io;
     void                     *mq_req;
     uint8_t                  rdy_bsy; /* if positive, waits for ready signal */
+    uint8_t                  local_dma; /* if > 0, DMA to LS2 memory */
 };
 
 #endif /* DFC_NAND_H */

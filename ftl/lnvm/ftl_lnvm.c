@@ -154,35 +154,31 @@ static void lnvm_callback_io (struct nvm_mmgr_io_cmd *cmd)
 static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
 {
     int c;
-    uint8_t plane;
     struct nvm_ppa_addr *ppa;
     struct nvm_mmgr_io_cmd *mio = &cmd->mmgr_io[index];
 
-    mio->pg_index = index;
-    mio->status = NVM_IO_SUCCESS;
     mio->nvm_io = cmd;
 
     if (cmd->cmdtype == MMGR_ERASE_BLK) {
         mio->ppa = cmd->ppalist[index];
+        mio->ch = cmd->channel[index];
         return 0;
     }
 
-    mio->ppa = cmd->ppalist[index * LNVM_SEC_PG];
+    mio->ppa = cmd->ppalist[mio->sec_offset];
+    mio->ch = cmd->channel[mio->sec_offset];
 
-    /* We put planes manually, for now */
-    plane = index % LNVM_PLANES;
-    mio->ppa.g.pl = plane;
-
-    /* We check ppa addresses for only for multiple sector page IOs */
-    if (!cmd->sec_offset || (cmd->sec_offset &&
-                                        (index+1 < cmd->status.total_pgs))) {
+    /* Writes must follow a correct page ppa sequence, while reads are allowed
+     * on sector granularity */
+    if (cmd->cmdtype == MMGR_WRITE_PG) {
         for (c = 1; c < LNVM_SEC_PG; c++) {
-            ppa = &cmd->ppalist[index * LNVM_SEC_PG + c];
+            ppa = &cmd->ppalist[mio->sec_offset + c];
             if (ppa->g.ch != mio->ppa.g.ch || ppa->g.lun != mio->ppa.g.lun ||
                     ppa->g.blk != mio->ppa.g.blk ||
                     ppa->g.pg != mio->ppa.g.pg   ||
+                    ppa->g.pl != mio->ppa.g.pl   ||
                     ppa->g.sec != mio->ppa.g.sec + c) {
-                log_err ("[ERROR ftl_lnvm: Wrong multi-sector ppa sequence. "
+                log_err ("[ERROR ftl_lnvm: Wrong write ppa sequence. "
                                                          "Aborting IO cmd.\n");
                 return -1;
             }
@@ -192,15 +188,17 @@ static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
     if (cmd->sec_sz != LNVM_SECSZ)
         return -1;
 
-    /* If offset is positive, last pg_size is smaller */
-    mio->pg_sz = (index+1 == cmd->status.total_pgs && cmd->sec_offset) ?
-                                cmd->sec_sz * cmd->sec_offset : LNVM_PG_SIZE;
+    /* Build the MMGR command on page granularity, but PRP for empty sectors
+     * are kept 0. The empty PRPs are checked in the MMGR for DMA. */
     mio->sec_sz = cmd->sec_sz;
-    mio->n_sectors = mio->pg_sz / mio->sec_sz;
-    mio->md_sz = cmd->md_sz / cmd->status.total_pgs;
+    mio->md_sz = LNVM_SEC_OOBSZ * LNVM_SEC_PG;
 
     for (c = 0; c < mio->n_sectors; c++)
-        mio->prp[c] = cmd->prp[index * LNVM_SEC_PG + c];
+        mio->prp[cmd->ppalist[mio->sec_offset + c].g.sec] =
+                                                cmd->prp[mio->sec_offset + c];
+
+    mio->pg_sz = LNVM_PG_SIZE;
+    mio->n_sectors = mio->pg_sz / mio->sec_sz;
 
     mio->md_prp = cmd->md_prp[index];
 
@@ -210,9 +208,6 @@ static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
 static int lnvm_check_io (struct nvm_io_cmd *cmd)
 {
     int i;
-
-    if (cmd->sec_offset && (cmd->cmdtype != MMGR_ERASE_BLK))
-        cmd->status.total_pgs = (cmd->n_sec / LNVM_SEC_PG) + 1;
 
     if (cmd->status.pgs_p == 0) {
         for (i = 0; i < cmd->status.total_pgs; i++)
@@ -224,8 +219,7 @@ static int lnvm_check_io (struct nvm_io_cmd *cmd)
     if (cmd->cmdtype == MMGR_ERASE_BLK)
         return 0;
 
-    if (cmd->status.total_pgs * LNVM_SEC_PG > 64
-                                                || cmd->status.total_pgs == 0){
+    if (cmd->status.total_pgs > 64 || cmd->status.total_pgs == 0){
         cmd->status.status = NVM_IO_FAIL;
         return cmd->status.nvme_status = NVME_INVALID_FORMAT;
     }
@@ -343,15 +337,16 @@ static int lnvm_init_channel (struct nvm_channel *ch)
     /* create and flush bad block table if it does not exist */
     /* this procedure will erase the entire device (only in test mode) */
     if (bbt->magic == FTL_LNVM_MAGIC) {
-        printf(" [lnvm: Channel %d. Creating bad block table...\n", ch->ch_id);
-        ret = lnvm_bbt_create (lch, bbt);
+        printf(" [lnvm: Channel %d. Creating bad block table...]", ch->ch_id);
+        fflush(stdout);
+        ret = lnvm_bbt_create (lch, bbt, LNVM_BBT_EMERGENCY);
         if (ret) goto ERR;
         ret = lnvm_flush_bbt (lch, bbt);
         if (ret) goto ERR;
     }
 
     LIST_INSERT_HEAD(&ch_head, lch, entry);
-    log_info("    [lnvm: channel %d started with %d bad blocks.\n",ch->ch_id,
+    log_info("    [lnvm: channel %d started with %d bad blocks.]\n",ch->ch_id,
                                                                 bbt->bb_count);
     return 0;
 
@@ -362,7 +357,7 @@ FREE_BBTBL:
 FREE_LCH:
     free(lch);
     log_err("[lnvm ERR: Ch %d -> Not possible to read/create bad block "
-                                                        "table.\n", ch->ch_id);
+                                                        "table.]\n", ch->ch_id);
     return ret;
 }
 

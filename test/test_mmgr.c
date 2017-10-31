@@ -427,6 +427,7 @@ static void *tests_io_thread (void *arg)
     int pg_i, pl_i;
     uint32_t pg_sz = NVM_PG_SIZE + NVM_OOB_SIZE;
     struct tests_sync_io *args = (struct tests_sync_io *) arg;
+    void *iobuf;
 
     for (pg_i = 0; pg_i < args->total_pgs; pg_i++) {
         if (pg_i % 200 == 0) {
@@ -448,9 +449,12 @@ static void *tests_io_thread (void *arg)
             args->cmd[pl_i].ppa.g.lun = rand_lun[1];
             args->cmd[pl_i].ppa.g.ch = args->ch->ch_mmgr_id;
 
-
-            if(nvm_submit_sync_io (args->ch, &args->cmd[pl_i], args->buf[pg_i] +
-                                (pg_sz * pl_i), args->cmdtype) && !thread_err)
+            if (args->cmdtype == MMGR_ERASE_BLK)
+                iobuf = 0;
+            else
+                iobuf = args->buf[pg_i] + (pg_sz * pl_i);
+            if(nvm_submit_sync_io (args->ch, &args->cmd[pl_i], iobuf,
+                                                args->cmdtype) && !thread_err)
                 thread_err++;
 
             pthread_mutex_lock(&usec_mutex);

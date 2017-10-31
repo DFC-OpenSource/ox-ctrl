@@ -72,6 +72,7 @@
 #include <sys/time.h>
 #include "include/uatomic.h"
 #include "include/ox-mq.h"
+#include "include/cmdline.h"
 
 LIST_HEAD(mmgr_list, nvm_mmgr) mmgr_head = LIST_HEAD_INITIALIZER(mmgr_head);
 LIST_HEAD(ftl_list, nvm_ftl) ftl_head = LIST_HEAD_INITIALIZER(ftl_head);
@@ -126,9 +127,19 @@ static struct nvm_ftl *nvm_get_ftl_instance(uint16_t ftl_id)
     return NULL;
 }
 
-static uint16_t nvm_ftl_q_schedule (struct nvm_ftl *ftl, struct nvm_io_cmd *cmd)
+static uint16_t nvm_ftl_q_schedule (struct nvm_ftl *ftl,
+                                      struct nvm_io_cmd *cmd, uint8_t multi_ch)
 {
-    return cmd->channel->ch_id % ftl->nq;
+    uint16_t qid;
+
+    if (!multi_ch)
+        return cmd->channel[0]->ch_id % ftl->nq;
+    else {
+        qid = ftl->next_queue;
+        ftl->next_queue = (ftl->next_queue + 1 == ftl->nq) ?
+                                                       0 : ftl->next_queue + 1;
+        return qid;
+    }
 }
 
 static void nvm_complete_to_host (struct nvm_io_cmd *cmd)
@@ -154,7 +165,7 @@ void nvm_complete_ftl (struct nvm_io_cmd *cmd)
 
     retry = NVM_QUEUE_RETRY;
     do {
-        ret = ox_mq_complete_req(cmd->channel->ftl->mq, req);
+        ret = ox_mq_complete_req(cmd->channel[0]->ftl->mq, req);
         if (ret) {
             retry--;
             usleep (NVM_QUEUE_RETRY_SLEEP);
@@ -165,7 +176,7 @@ void nvm_complete_ftl (struct nvm_io_cmd *cmd)
 static void nvm_ftl_process_sq (struct ox_mq_entry *req)
 {
     struct nvm_io_cmd *cmd = (struct nvm_io_cmd *) req->opaque;
-    struct nvm_ftl *ftl = cmd->channel->ftl;
+    struct nvm_ftl *ftl = cmd->channel[0]->ftl;
     int ret;
 
     cmd->mq_req = (void *) req;
@@ -192,7 +203,7 @@ static void nvm_ftl_process_to (void **opaque, int counter)
         counter--;
         cmd = (struct nvm_io_cmd *) opaque[counter];
         cmd->status.status = NVM_IO_FAIL;
-        cmd->status.nvme_status = NVME_CMD_ABORT_REQ;
+        cmd->status.nvme_status = NVME_MEDIA_TIMEOUT;
     }
 }
 
@@ -204,16 +215,19 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
         return EMAX_NAME_SIZE;
 
     /* Start FTL multi-queue */
+    sprintf(mq_config.name, "%s", ftl->name);
     mq_config.n_queues = ftl->nq;
     mq_config.q_size = NVM_FTL_QUEUE_SIZE;
     mq_config.sq_fn = nvm_ftl_process_sq;
     mq_config.cq_fn = nvm_ftl_process_cq;
     mq_config.to_fn = nvm_ftl_process_to;
-    mq_config.to_usec = 0;
+    mq_config.to_usec = NVM_FTL_QUEUE_TO;
     mq_config.flags = OX_MQ_TO_COMPLETE;
     ftl->mq = ox_mq_init(&mq_config);
     if (!ftl->mq)
         return EFTL_REGISTER;
+
+    ftl->next_queue = 0;
 
     core.ftl_q_count += ftl->nq;
 
@@ -265,16 +279,17 @@ void nvm_callback (struct nvm_mmgr_io_cmd *cmd)
         }
         pthread_mutex_unlock(cmd->sync_mutex);
     } else {
-        cmd->nvm_io->channel->ftl->ops->callback_io(cmd);
+        cmd->ch->ftl->ops->callback_io(cmd);
     }
 }
 
 int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 {
-    struct nvm_channel *ch;
+    struct nvm_ftl *ftl;
     int ret, retry, i, qid;
+    uint8_t ch_ppa[core.nvm_ch_count];
+    uint8_t multi_ch = 0;
     NvmeRequest *req = (NvmeRequest *) cmd->req;
-    uint8_t aux_ch;
 
     cmd->status.nvme_status = NVME_SUCCESS;
 
@@ -299,26 +314,31 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 
 #if LIGHTNVM
     /* For now, the host ppa channel must be aligned with core.nvm_ch[] */
-    /* All ppas within the vector must address to the same channel */
-    aux_ch = cmd->ppalist[0].g.ch;
+    /* All PPAs in the vector must address channels managed by the same FTL */
+    if (cmd->ppalist[0].g.ch >= core.nvm_ch_count)
+        goto CH_ERR;
 
-    if (aux_ch >= core.nvm_ch_count) {
-        syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
-        req->status = NVME_CMD_ABORT_REQ;
-        nvm_complete_to_host(cmd);
-        return NVME_CMD_ABORT_REQ;
+    ftl = core.nvm_ch[cmd->ppalist[0].g.ch]->ftl;
+
+    memset (ch_ppa, 0, sizeof (uint8_t) * core.nvm_ch_count);
+
+    /* Per PPA checking */
+    for (i = 0; i < cmd->n_sec; i++) {
+        if (cmd->ppalist[i].g.ch >= core.nvm_ch_count)
+            goto CH_ERR;
+
+        ch_ppa[cmd->ppalist[i].g.ch]++;
+
+        if (!multi_ch && cmd->ppalist[i].g.ch != cmd->ppalist[0].g.ch)
+            multi_ch++;
+
+        if (core.nvm_ch[cmd->ppalist[i].g.ch]->ftl != ftl)
+            goto FTL_ERR;
+
+        /* Set channel per PPA */
+        cmd->channel[i] = core.nvm_ch[cmd->ppalist[i].g.ch];
     }
 
-    for (i = 1; i < cmd->n_sec; i++) {
-        if (cmd->ppalist[i].g.ch != aux_ch) {
-            syslog(LOG_INFO,"[nvm ERROR: IO failed, ch does not match.]\n");
-            req->status = NVME_INVALID_FIELD;
-            nvm_complete_to_host(cmd);
-            return NVME_INVALID_FIELD;
-        }
-    }
-
-    ch = core.nvm_ch[aux_ch];
 #else
     /* For now all channels must be included in the global namespace */
     for (i = 0; i < core.nvm_ch_count; i++) {
@@ -335,25 +355,36 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 #endif /* LIGHTNVM */
 
     cmd->status.status = NVM_IO_PROCESS;
-    cmd->channel = ch;
     retry = NVM_QUEUE_RETRY;
 
-    qid = nvm_ftl_q_schedule (ch->ftl, cmd);
+    qid = nvm_ftl_q_schedule (ftl, cmd, multi_ch);
     do {
-        ret = ox_mq_submit_req(ch->ftl->mq, qid, cmd);
+        ret = ox_mq_submit_req(ftl->mq, qid, cmd);
 
-    	if (ret)
+        if (ret)
             retry--;
-        else if (core.debug)
-            printf(" CMD cid: %lu, type: 0x%x submitted to FTL. \n  Channel: "
-                  "%d, FTL queue %d\n", cmd->cid, cmd->cmdtype, ch->ch_id, qid);
-
+        else if (core.debug) {
+            printf(" CMD cid: %lu, type: 0x%x submitted to FTL. "
+                               "FTL queue: %d\n", cmd->cid, cmd->cmdtype, qid);
+            for (i = 0; i < core.nvm_ch_count; i++)
+                if (ch_ppa[i] > 0)
+                    printf("  Channel: %d, PPAs: %d\n", i, ch_ppa[i]);
+        }
     } while (ret && retry);
 
-    if (core.debug)
-        usleep (150000);
-
     return (retry) ? NVME_NO_COMPLETE : NVME_CMD_ABORT_REQ;
+
+CH_ERR:
+    log_err("[nvm ERROR: IO failed, channel not found.]\n");
+    req->status = NVME_CMD_ABORT_REQ;
+    nvm_complete_to_host(cmd);
+    return NVME_CMD_ABORT_REQ;
+
+FTL_ERR:
+    log_err("[nvm ERROR: IO failed, channels do not match FTL.]\n");
+    req->status = NVME_INVALID_FIELD;
+    nvm_complete_to_host(cmd);
+    return NVME_INVALID_FIELD;
 }
 
 int nvm_dma (void *ptr, uint64_t prp, ssize_t size, uint8_t direction)
@@ -385,11 +416,11 @@ int nvm_submit_mmgr (struct nvm_mmgr_io_cmd *cmd)
 
     switch (cmd->nvm_io->cmdtype) {
         case MMGR_WRITE_PG:
-            return cmd->nvm_io->channel->mmgr->ops->write_pg(cmd);
+            return cmd->ch->mmgr->ops->write_pg(cmd);
         case MMGR_READ_PG:
-            return cmd->nvm_io->channel->mmgr->ops->read_pg(cmd);
+            return cmd->ch->mmgr->ops->read_pg(cmd);
         case MMGR_ERASE_BLK:
-            return cmd->nvm_io->channel->mmgr->ops->erase_blk(cmd);
+            return cmd->ch->mmgr->ops->erase_blk(cmd);
         default:
             return -1;
     }
@@ -622,6 +653,7 @@ static void nvm_unregister_mmgr (struct nvm_mmgr *mmgr)
     free(mmgr->ch_info);
     LIST_REMOVE(mmgr, entry);
     core.mmgr_count--;
+    core.nvm_ch_count -= mmgr->geometry->n_of_ch;
     log_info(" [nvm: Media Manager unregistered: %s]\n", mmgr->name);
 }
 
@@ -646,6 +678,8 @@ static int nvm_ch_config ()
     core.nvm_ch = calloc(sizeof(struct nvm_channel *), core.nvm_ch_count);
     if (nvm_memcheck(core.nvm_ch))
         return EMEM;
+
+    core.nvm_ns_size = 0;
 
     struct nvm_channel *ch;
     struct nvm_mmgr *mmgr;
@@ -733,6 +767,9 @@ int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
     }
 
     ppa = arg[0];
+    if (ppa->g.ch >= core.nvm_ch_count)
+        goto OUT;
+
     ch = core.nvm_ch[ppa->g.ch];
     if (nvm_memcheck(ch))
         goto OUT;
@@ -771,16 +808,21 @@ OUT:
     return -1;
 }
 
-static int nvm_init ()
+int nvm_init (uint8_t start_all)
 {
     int ret;
-    core.mmgr_count = 0;
-    core.ftl_count = 0;
-    core.ftl_q_count = 0;
-    core.nvm_ch_count = 0;
-    core.run_flag = 0;
 
-    core.nvm_nvme_ctrl = malloc (sizeof (NvmeCtrl));
+    core.ftl_q_count = 0;
+    core.run_flag = 0;
+    core.ftl_count = 0;
+
+    if (start_all) {
+        core.run_flag |= RUN_TESTS;
+        core.mmgr_count = 0;
+        core.nvm_ch_count = 0;
+        core.nvm_nvme_ctrl = malloc (sizeof (NvmeCtrl));
+    }
+
     if (!core.nvm_nvme_ctrl)
         return EMEM;
     core.nvm_nvme_ctrl->running = 1; /* not ready */
@@ -788,14 +830,14 @@ static int nvm_init ()
 
     /* media managers */
 #ifdef CONFIG_MMGR_DFCNAND
-    ret = mmgr_dfcnand_init();
-    if(ret) goto OUT;
+        ret = mmgr_dfcnand_init();
+        if(ret) goto OUT;
 #endif
 #ifdef CONFIG_MMGR_VOLT
-    ret = mmgr_volt_init();
-    if(ret) goto OUT;
+        ret = mmgr_volt_init();
+        if(ret) goto OUT;
 #endif
-    core.run_flag |= RUN_MMGR;
+        core.run_flag |= RUN_MMGR;
 
     /* flash translation layers */
 #ifdef CONFIG_FTL_LNVM
@@ -810,16 +852,21 @@ static int nvm_init ()
     core.run_flag |= RUN_CH;
 
     /* pci handler */
-    ret = dfcpcie_init();
-    if(ret) goto OUT;
-    core.run_flag |= RUN_PCIE;
+    if (start_all) {
+        ret = dfcpcie_init();
+        if(ret) goto OUT;
+        core.run_flag |= RUN_PCIE;
+    }
 
     /* nvme standard */
     ret = nvme_init(core.nvm_nvme_ctrl);
     if(ret) goto OUT;
     core.run_flag |= RUN_NVME;
-    core.run_flag |= RUN_TESTS;
+
     core.nvm_nvme_ctrl->running = 0; /* ready */
+    core.nvm_nvme_ctrl->stop = 0;
+
+    printf("OX Controller started succesfully. Log: /var/log/nvme.log\n");
 
     return 0;
 
@@ -827,19 +874,19 @@ OUT:
     return ret;
 }
 
-static void nvm_clean_all ()
+void nvm_clear_all (uint8_t stop_all)
 {
     struct nvm_ftl *ftl;
     struct nvm_mmgr *mmgr;
 
     /* Clean PCIe handler */
-    if(core.nvm_pcie && (core.run_flag & RUN_PCIE)) {
+    if(core.nvm_pcie && (core.run_flag & RUN_PCIE) && stop_all) {
         core.nvm_pcie->ops->exit();
         core.run_flag ^= RUN_PCIE;
     }
 
     /* Clean channels */
-    if (core.run_flag & RUN_CH) {
+    if ((core.run_flag & RUN_CH)) {
         free(core.nvm_ch);
         core.run_flag ^= RUN_CH;
     }
@@ -864,15 +911,29 @@ static void nvm_clean_all ()
 
     /* Clean Nvme */
     if((core.run_flag & RUN_NVME) && core.nvm_nvme_ctrl->num_namespaces) {
+        core.nvm_nvme_ctrl->running = 1; /* not ready */
+        usleep (100);
         nvme_exit();
         core.run_flag ^= RUN_NVME;
     }
-    if ((core.run_flag & RUN_TESTS) == 0 && (core.run_flag & RUN_NVME_ALLOC)) {
+    if ((core.run_flag & RUN_TESTS) == 0 && (core.run_flag & RUN_NVME_ALLOC)
+                                                                 && stop_all) {
         free(core.nvm_nvme_ctrl);
         core.run_flag ^= RUN_NVME_ALLOC;
     }
 
     printf("OX Controller closed succesfully.\n");
+}
+
+int nvm_restart ()
+{
+    int ret;
+
+    nvm_clear_all (NVM_RESTART);
+    if (ret = nvm_init (NVM_RESTART) == 0)
+        core.nvm_pcie->ops->reset();
+
+    return ret;
 }
 
 static struct nvm_mmgr *nvm_get_mmgr (char *name)
@@ -919,9 +980,6 @@ static void nvm_printerror (int error)
 
 static void nvm_print_log ()
 {
-    printf("OX Controller started succesfully. "
-            "Log: /var/log/nvme.log\n");
-
     log_info("[nvm: OX Controller ready.]\n");
     log_info("  [nvm: Active pci handler: %s]\n", core.nvm_pcie->name);
     log_info("  [nvm: %d media manager(s) up, total of %d channels]\n",
@@ -955,6 +1013,21 @@ int nvm_memcheck (void *mem) {
         invalid = 1;
     signal (SIGSEGV, SIG_DFL);
     return invalid;
+}
+
+int nvm_contains_ppa (struct nvm_ppa_addr *list, uint32_t list_sz,
+                                                        struct nvm_ppa_addr ppa)
+{
+    int i;
+
+    if (!list)
+        return 0;
+
+    for (i = 0; i < list_sz; i++)
+        if (ppa.ppa == list[i].ppa)
+            return 1;
+
+    return 0;
 }
 
 int nvm_test_unit (struct nvm_init_arg *args)
@@ -999,10 +1072,10 @@ int nvm_init_ctrl (int argc, char **argv)
     LIST_INIT(&mmgr_head);
     LIST_INIT(&ftl_head);
 
-    printf("OX Controller is starting. Please, wait...\n");
+    printf("OX Controller %s - %s\n Starting...\n", OX_VER, LABEL);
     log_info("[nvm: OX Controller is starting...]\n");
 
-    ret = nvm_init();
+    ret = nvm_init(NVM_FULL_UPDOWN);
     if(ret)
         goto CLEAN;
 
@@ -1017,15 +1090,14 @@ int nvm_init_ctrl (int argc, char **argv)
             break;
         case OX_RUN_MODE:
             core.run_flag ^= RUN_TESTS;
-            while(!core.nvm_nvme_ctrl->running)
-                usleep(NVM_SEC);
-            break;
+            cmdline_start();
+            goto OUT;
         default:
             goto CLEAN;
     }
 
     if (core.tests_init->init) {
-        pthread_create(&mode_t, NULL, modet_fn, NULL);
+        pthread_create(&mode_t, NULL, modet_fn, core.args_global);
         pthread_join(mode_t, NULL);
     }
 
@@ -1033,10 +1105,10 @@ int nvm_init_ctrl (int argc, char **argv)
 CLEAN:
     printf(" ERROR 0x%x. Aborting. Check log file.\n", ret);
     nvm_printerror(ret);
-    nvm_clean_all();
+    nvm_clear_all(NVM_FULL_UPDOWN);
     return -1;
 OUT:
-    nvm_clean_all();
+    nvm_clear_all(NVM_FULL_UPDOWN);
     return 0;
 }
 

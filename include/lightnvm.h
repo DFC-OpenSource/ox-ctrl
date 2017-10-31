@@ -4,17 +4,25 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#define LNVM_SECSZ          CONFIG_LNVM_SECSZ
-#define LNVM_SEC_OOBSZ      CONFIG_LNVM_SEC_OOBSZ
-#define LNVM_SEC_PG         CONFIG_LNVM_SEC_PG
-#define LNVM_PG_BLK         CONFIG_LNVM_PG_BLK
-#define LNVM_CH             CONFIG_LNVM_CH
-#define LNVM_LUN_CH         CONFIG_LNVM_LUN_CH
-#define LNVM_BLK_LUN        CONFIG_LNVM_BLK_LUN
-#define LNVM_PLANES         CONFIG_LNVM_PLANES
+#define LNVM_SECSZ          CONFIG_NVM_SECSZ
+#define LNVM_SEC_OOBSZ      CONFIG_NVM_SEC_OOBSZ
+#define LNVM_SEC_PG         (1 << CONFIG_NVM_SEC_PG)
+#define LNVM_PG_BLK         (1 << CONFIG_NVM_PG_BLK)
+#define LNVM_CH             (1 << CONFIG_NVM_CH)
+#define LNVM_LUN_CH         (1 << CONFIG_NVM_LUN_CH)
+#define LNVM_BLK_LUN        (1 << CONFIG_NVM_BLK_LUN)
+#define LNVM_PLANES         (1 << CONFIG_NVM_PLANES)
 #define LNVM_PG_SIZE        (LNVM_SECSZ * LNVM_SEC_PG)
 #define LNVM_PL_PG_SIZE     (LNVM_SECSZ * LNVM_SEC_PG * LNVM_PLANES)
 #define LNVM_SEC_PL_PG      (LNVM_SEC_PG * LNVM_PLANES)
+
+#define LNVM_SEC_BITS       CONFIG_NVM_SEC_PG
+#define LNVM_PG_BITS        CONFIG_NVM_PG_BLK
+#define LNVM_PL_BITS        CONFIG_NVM_PLANES
+#define LNVM_BLK_BITS       CONFIG_NVM_BLK_LUN
+#define LNVM_LUN_BITS       CONFIG_NVM_LUN_CH
+#define LNVM_CH_BITS        CONFIG_NVM_CH
+#define LNVM_RSV_BITS       CONFIG_NVM_RESERVED
 
 #define LNVM_MAX_SEC_RQ     64
 #define LNVM_MTYPE          0
@@ -122,7 +130,6 @@ typedef struct LnvmParams {
     uint8_t     num_ch;
     uint8_t     num_pln;
     uint8_t     num_lun;
-    //uint16_t    num_blk;
     /* calculated values */
     uint32_t    sec_per_phys_pl;
     uint32_t    sec_per_log_pl;
