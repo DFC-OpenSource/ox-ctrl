@@ -1072,7 +1072,7 @@ int nvm_init_ctrl (int argc, char **argv)
     LIST_INIT(&mmgr_head);
     LIST_INIT(&ftl_head);
 
-    printf("OX Controller is starting. Please, wait...\n");
+    printf("OX Controller %s - %s\n Starting...\n", OX_VER, LABEL);
     log_info("[nvm: OX Controller is starting...]\n");
 
     ret = nvm_init(NVM_FULL_UPDOWN);

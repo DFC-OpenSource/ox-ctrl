@@ -1,5 +1,10 @@
 ######### Makefile for OX: OpenChannel SSD Controller #########
 
+VERSION = 1
+PATCHLEVEL = 4
+SUBLEVEL = 0
+LABEL = The Lonely Dragon
+
 NAME = ox-ctrl       # DFC with DFCNAND
 NAMET = ox-ctrl-test # DFC with DFCNAND + tests
 NAMEV = ox-ctrl-volt # DFC with VOLT + tests
@@ -8,12 +13,20 @@ CORE_VOLT = core-v.o ox-mq-v.o nvme-v.o nvme_cmd-v.o lightnvm-v.o cmd_args-v.o o
 CLEAN = *.o *-v.o
 
 ### CONFIGURATION MACROS
+CONFIG_VER  = -DCONFIG_VERSION=$(VERSION)
+CONFIG_VER += -DCONFIG_PATCHLEVEL=$(PATCHLEVEL)
+CONFIG_VER += -DCONFIG_SUBLEVEL=$(SUBLEVEL)
+CONFIG_VER += -DCONFIG_LABEL='"$(LABEL)"'
+
 CONFIG_FTL = -DCONFIG_FTL_LNVM
+
 # (1) Macro to tell OX core which MMGRs and FTLs are compiled
 # (2) Macro to define global Open-Channel geometry (in bits)
+# (3) Macro for versioning
 # ox-ctrl and ox-ctrl-test
 CONFIG_DFC  = -DCONFIG_MMGR_DFCNAND	    # (1)
 CONFIG_DFC += $(CONFIG_FTL)		    # (1)
+CONFIG_DFC += $(CONFIG_VER)		    # (3)
 CONFIG_DFC += -DCONFIG_NVM_SECSZ=0x1000     # (2)
 CONFIG_DFC += -DCONFIG_NVM_SEC_OOBSZ=0x10   # (2)
 CONFIG_DFC += -DCONFIG_NVM_SEC_PG=2	    # (2)
@@ -26,6 +39,7 @@ CONFIG_DFC += -DCONFIG_NVM_RESERVED=37	    # (2)
 # ox-ctrl-volt
 CONFIG_VOLT  = -DCONFIG_MMGR_VOLT		# (1)
 CONFIG_VOLT += $(CONFIG_FTL)			# (1)
+CONFIG_VOLT += $(CONFIG_VER)			# (3)
 CONFIG_VOLT += -DCONFIG_NVM_SECSZ=0x1000	# (2)
 CONFIG_VOLT += -DCONFIG_NVM_SEC_OOBSZ=0x10	# (2)
 CONFIG_VOLT += -DCONFIG_NVM_SEC_PG=2		# (2)

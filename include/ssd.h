@@ -50,6 +50,16 @@
 #include "uatomic.h"
 #include "lightnvm.h"
 
+#define STR_HELPER(x) #x
+#define STR(x) STR_HELPER(x)
+
+#define VERSION     CONFIG_VERSION
+#define PATCH       CONFIG_PATCHLEVEL
+#define SUBLEVEL    CONFIG_SUBLEVEL
+#define LABEL       CONFIG_LABEL
+#define OX_VER      STR(VERSION) "." STR(PATCH) "." STR(SUBLEVEL)
+#define OX_LABEL    OX_VER "-" LABEL
+
 #define MAX_NAME_SIZE           31
 #define NVM_QUEUE_RETRY         16
 #define NVM_QUEUE_RETRY_SLEEP   500
