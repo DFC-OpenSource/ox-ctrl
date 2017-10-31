@@ -1,10 +1,9 @@
 # OX: A DFC-based Open-Channel SSD Controller
 
 ```
-OX 1.4 is coming soon. The main feature is supporting pblk target (host FTL) by enabling 
-sector-granularity reads. It will allow file systems on top of the DFC namespace. The 
-pre-release code is already available under 'for-next' branch. OX 1.4 will be released
-for the linux kernel 4.13.
+OX 1.4.0 is released. The main feature is supporting pblk target (host FTL) by enabling 
+sector-granularity reads. It allows file systems on top of the DFC namespace. It requires 
+the linux kernel 4.13 or higher. Please, check the 'pblk: Host-side FTL setup' section.
 ```
 
 OX is a controller solution for programmable devices like the DFC (https://github.com/DFC-OpenSource/). OX exposes the
@@ -15,7 +14,7 @@ OX is developed under a project at the IT-University of Copenhagen and welcomes 
 
 Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctrl/wiki), latest releases here (https://github.com/DFC-OpenSource/ox-ctrl/releases) and code under development here (https://github.com/DFC-OpenSource/ox-ctrl/tree/for-next).
 
-# OX 1.3 evaluation:  
+# OX 1.3/1.4 evaluation:  
  Evaluated with FOX 1.0 (https://github.com/DFC-OpenSource/fox).
 ```
 READ : ~385 MB/s
@@ -49,13 +48,13 @@ LightNVM is the Linux kernel support for Open-Channel SSDs. It is included in th
 
 Installing this kernel, you will be able to run a wide set of workloads on the DFC using FOX (https://github.com/DFC-OpenSource/fox), a tool for testing Open-Channel SSDs.
 
-pblk (http://lightnvm.io/pblk-tools/) is a host-based full-fledged FTL. It exposes an open-channel SSD as a block device and will be available in the kernel 4.12. It means that a standard file system like EXT4 can be mounted on top of the DFC. We are working towards to improve the DFC performance with pblk.
+pblk (http://lightnvm.io/pblk-tools/) is a host-based full-fledged FTL. It exposes an open-channel SSD as a block device and is currently available in the kernel 4.13 or higher. It means that a standard file system like EXT4 or F2FS can be mounted on top of the DFC. OX release 1.4.0 supports pblk and file systems.
 
-# I DO NOT HAVE A DFC: OX emulation with QEMU
+# IF YOU DON'T HAVE A DFC: OX emulation with QEMU
 
 If you do not have an OX-enabled board like the DFC, you can emulate OX with QEMU. We have developed a version of QEMU containing OX with few modifications for the emulated environment. Please follow the instructions in (https://github.com/DFC-OpenSource/qemu-ox). This QEMU version uses VOLT, our volatile media manager with 4 GB of emulated NAND. So, all data will be lost if you turn QEMU off.
 
-# I HAVE A DFC WITHOUT FPGA OR NAND DIMM: OX Volt Media Manager
+# IF YOU HAVE A DFC WITHOUT NAND DIMMs: OX Volt Media Manager
 
 If you have a DFC but does not have a storage FPGA card with NAND DIMMs, your option is using Volt, our volatile backend in the DFC DRAM. Just start OX with one of the follow commands:
 ```
@@ -72,42 +71,94 @@ Remember to blacklist the nvme driver during the system startup. You can do this
 GRUB_CMDLINE_LINUX_DEFAULT="quiet splash blacklist=nvme mem=8G"
 ```
 
-# FOX testing setup:
-```
+# FTL support:
 
-- Install the right kernel with user IO support (uptream in kernel 4.11):
+OX has a library for supporting a full-fledged FTL, but some coding is still needed. pblk (http://lightnvm.io/pblk-tools/) is a full-fledged FTL upstream in the Linux kernel 4.13 or higher. With pblk, it is be possible to mount a file system on top of OX and the DFC.
+
+# pblk: Host-side FTL setup
+```
+(1) Install the right kernel with user IO support (kernel 4.13 or higher):
   - https://www.kernel.org/
   
-- Blacklist the nvme driver (not necessary in QEMU. For the DFC, we use an OX-enabled driver);
-
-- Install liblightnvm;
-  - http://lightnvm.io/liblightnvm/
+(2) Blacklist the nvme driver (not necessary in QEMU. For the DFC, we use an OX-enabled driver);
   
-- Start OX Controller in the DFC (in QEMU it will be already started). You have to install OX on the DFC before;
+(3) Start OX Controller in the DFC (in QEMU it will be already started). You have to install OX on the DFC before;
   In the DFC console:
   $ ox-ctrl start
+
+(4) Create the bad block tables for all channels. Skip this step if you already did it in your NAND DIMM.
+  Follow the 'Bad block table creation' section for details.
   
-- Build and load the NVMe driver (in QEMU it will be already loaded);
+(5) Build and load the NVMe driver (in QEMU it will be already loaded);
   - https://github.com/ivpi/nvme-driver-DFC
   $ sudo insmod <driver_folder>/nvme-core.ko
   $ sudo insmod <driver_folder>/nvme.ko
   
-- Check the kernel log, you should see the device registration messages;
+(6) Check the kernel log, you should see the device registration messages;
   lnvm: Dragon Fire Card NVMe Driver support.
   nvm: registered nvme0n1 [4/2/512/1024/32/8]
   
-- Run the tests with the tool (https://github.com/DFC-OpenSource/fox), or use liblightnvm as you wish.
+(7) Check if pblk is compiled and started;
+  $ sudo nvme lnvm info
+  
+(8) Initialize pblk on the DFC namespace;
+  $ sudo nvme lnvm create -t pblk -d nvme0n1 -n dfc -b 0 -e 31
+  It might take a while. Please check the kernel log for completion.
+  
+(9) Create a partition table;
+  $ sudo fdisk /dev/dfc
+  use 'g' for creating a new partition table
+  use 'n' for creating a new partition
+  use 'w' for writing the changes to storage
+ 
+(10) Format your partition with a file system;
+  $ sudo mkfs.ext4 /dev/dfc1
+  Check kernel log for completion.
+
+(11) Mount the partition;
+  $ sudo mount /dev/dfc1 <mount_folder>
+
+(12) You might need to give permissions to your user;
+  $ sudo chown <user>:<user> <mount_folder>
+  
+(13) Enjoy your new storage device transferring some files to it :)
 ```
 
-# FTL support:
+# FOX testing setup:
+```
 
-OX has a library for supporting a full-fledged FTL, but some coding is still needed. pblk (http://lightnvm.io/pblk-tools/) is a full-fledged FTL upstream in the Linux kernel 4.12. We are working torwards for making pblk working well with the DFC and OX Controller. With pblk, it will be possible mounting a file system on top of OX and the DFC.
+(1) Install the right kernel with user IO support (kernel 4.11 or higher):
+  - https://www.kernel.org/
+  
+(2) Blacklist the nvme driver (not necessary in QEMU. For the DFC, we use an OX-enabled driver);
+
+(3) Install liblightnvm;
+  - http://lightnvm.io/liblightnvm/
+  
+(4) Start OX Controller in the DFC (in QEMU it will be already started). You have to install OX on the DFC before;
+  In the DFC console:
+  $ ox-ctrl start
+
+(5) Create the bad block tables for all channels. Skip this step if you already did it in your NAND DIMM.
+  Follow the 'Bad block table creation' section for details.
+  
+(6) Build and load the NVMe driver (in QEMU it will be already loaded);
+  - https://github.com/ivpi/nvme-driver-DFC
+  $ sudo insmod <driver_folder>/nvme-core.ko
+  $ sudo insmod <driver_folder>/nvme.ko
+  
+(7) Check the kernel log, you should see the device registration messages;
+  lnvm: Dragon Fire Card NVMe Driver support.
+  nvm: registered nvme0n1 [4/2/512/1024/32/8]
+  
+(8) Run the tests with the tool (https://github.com/DFC-OpenSource/fox), or use liblightnvm as you wish.
+```
 
 # FPGA version and DFC config
  
 This controller supports the FPGA 3.01.00.
 
-The latest stable DFC firmware version (with OX 1.3):
+The latest stable DFC firmware version (with OX 1.4.0):
 ```
 ========================================
         Image           Version                
@@ -125,10 +176,11 @@ The latest stable DFC firmware version (with OX 1.3):
 ```
 The latest DFC hardware configuration:
 ```
+LS2085 Dragon Fire Card (soon LS2088);
 2 NAND DIMM modules installed in the slots M1 and M3 of the storage card.
 ```
 
-# Features:
+# Internal components:
 
 ```
       - Media managers: NAND, DDR, etc.
@@ -160,7 +212,25 @@ The latest DFC hardware configuration:
 ```
 We have implemented a PCIe interconnection handler, a media manager to expose 8 channels, NVMe and LightNVM support for the DFC.
 
-HOW TO INSTALL AND USE:
+# Bad block table creation
+The bad block table is an essential component of a flash block device, without it you can expect data corruption due
+application bad block allocation. OX has an admin command for creating per-channel bad block tables. Please follow the instruction in 'ox-ctrl-test admin -t create-bbt' command.
+
+When attempting to create a bad block table in a given channel, OX will ask which process you want to use. There are 3 available processes:
+``` 
+   1 - Full scan (Erase, write full, read full, compare buffers) - RECOMMENDED. Might take a long time
+           - Backup the channel data before. ALL DATA WILL BE LOST.
+           
+   2 - Fast scan (Only erase the blocks) - Fast creation, but can have omitted bad blocks.
+           - Backup the channel data before. ALL DATA WILL BE LOST.
+           
+   3 - Emergency table (Creates an empty bad block table without erasing blocks) - Very fast and the channel is not erased.
+           - If you can't make a backup of your channel, use this option for initializing OX, however, all blocks will be
+              marked as good. You should use the DFC in read-only state if you create an emergency bad block table.
+```
+Bad block table creation option is available in the ox-ctrl-test binary.
+
+# Installation:
 
 The Makefile creates 3 binaries (ox-ctrl, ox-ctrl-test and ox-ctrl-volt). 
  - ox-ctrl is a essential-only binary for a production environment. 
@@ -280,13 +350,10 @@ OX Controller ADMIN
 Available OX Admin Tasks: 
 
   - 'erase-blk': erase specific blocks.
-     eg. ox-ctrl admin -t erase-blk
+     eg. ox-ctrl-test admin -t erase-blk (follow instructions within command)
 
-  - 'erase-lun': erase specific LUNs.
-     eg. ox-ctrl admin -t erase-lun (not implemented)
-
-  - 'erase-ch': erase specific channels.
-     eg. ox-ctrl admin -t erase-ch (not implemented)
+  - 'create-bbt': creates a new bad block table for a specific channel.
+     eg. ox-ctrl-test admin -t create-bbt (follow instructions within command)
 ```
 
 # OX layer registration:
