@@ -5,6 +5,9 @@ OX 1.4.0 is released. The main feature is supporting pblk target (host FTL) by e
 sector-granularity reads. It allows file systems on top of the DFC namespace. It requires 
 the linux kernel 4.13 or higher. Please, check the 'pblk: Host-side FTL setup' section.
 ```
+Publications:
+- uFLIP-OC: Understanding Flash I/O Patterns on Open-Channel Solid-State Drives                                         
+  https://dl.acm.org/citation.cfm?id=3124680.3124741
 
 OX is a controller solution for programmable devices like the DFC (https://github.com/DFC-OpenSource/). OX exposes the
 device as a LightNVM compatible Open-Channel SSD. OX has been developed for potentially support different FTL responsabilities (e.g. write buffering, ECC) or a full-fledged FTL. FTLs are registered within the OX core, enabling applications to select channels to be managed by a specific FTL. The LightNVM FTL, already in OX, parses LightNVM (http://lightnvm.io/) commands and lets the DFC being managed by the host. e.g. The Linux kernel and user-space applications are able to see, manage and isolate the SSD geometry (channels, LUNs, blocks and pages).
