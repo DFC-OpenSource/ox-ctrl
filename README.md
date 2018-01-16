@@ -1,6 +1,11 @@
 # OX: A DFC-based Open-Channel SSD Controller
 
 ```
+COMING SOON...
+OX 2.0 is coming with a new full-fledged FTL and Near-Data Processing support! Tune the FTL
+and run application specific functions at runtime using NVMe!
+
+RELEASE
 OX 1.4.0 is released. The main feature is supporting pblk target (host FTL) by enabling 
 sector-granularity reads. It allows file systems on top of the DFC namespace. It requires 
 the linux kernel 4.13 or higher. Please, check the 'pblk: Host-side FTL setup' section.
@@ -76,7 +81,7 @@ GRUB_CMDLINE_LINUX_DEFAULT="quiet splash blacklist=nvme mem=8G"
 
 # FTL support:
 
-OX has a library for supporting a full-fledged FTL, but some coding is still needed. pblk (http://lightnvm.io/pblk-tools/) is a full-fledged FTL upstream in the Linux kernel 4.13 or higher. With pblk, it is be possible to mount a file system on top of OX and the DFC.
+OX 2.0 is coming with a new full-fledged FTL (use the DFC as a block device only by running OX). You can also use pblk for a host-based FTL (http://lightnvm.io/pblk-tools/). Pblk is a full-fledged FTL upstream in the Linux kernel 4.13 or higher. With pblk, it is be possible to mount a file system on top of OX and the DFC.
 
 # pblk: Host-side FTL setup
 ```
