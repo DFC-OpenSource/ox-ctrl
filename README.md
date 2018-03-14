@@ -2,14 +2,16 @@
 
 ```
 COMING SOON...
-OX 2.0 is coming with a new full-fledged FTL and Near-Data Processing support! Tune the FTL
-and run application specific functions at runtime using NVMe!
+OX 2.0 is coming with a new full-fledged FTL and Near-Data Processing support!
 
 RELEASE
 OX 1.4.0 is released. The main feature is supporting pblk target (host FTL) by enabling 
 sector-granularity reads. It allows file systems on top of the DFC namespace. It requires 
 the linux kernel 4.13 or higher. Please, check the 'pblk: Host-side FTL setup' section.
 ```
+Documentation:  
+- https://github.com/DFC-OpenSource/ox-ctrl/wiki  
+
 Publications:
 - uFLIP-OC: Understanding Flash I/O Patterns on Open-Channel Solid-State Drives                                         
   https://dl.acm.org/citation.cfm?id=3124680.3124741
