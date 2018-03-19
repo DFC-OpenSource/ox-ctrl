@@ -201,6 +201,7 @@ static int lnvm_check_pg_io (struct nvm_io_cmd *cmd, uint8_t index)
     mio->n_sectors = mio->pg_sz / mio->sec_sz;
 
     mio->md_prp = cmd->md_prp[index];
+    mio->force_sync_md = 0;
 
     return 0;
 }
@@ -406,7 +407,7 @@ static int lnvm_ftl_set_bbtbl (struct nvm_ppa_addr *ppa, uint8_t value)
     return 0;
 }
 
-static void lnvm_exit (struct nvm_ftl *ftl)
+static void lnvm_exit (void)
 {
     struct lnvm_channel *lch;
 
