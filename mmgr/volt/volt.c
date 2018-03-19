@@ -349,6 +349,10 @@ static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
                                             nvm_cmd->md_sz && c == dma_sec - 1)
             volt_oob_reorder (oob_addr, sec_map);
 
+        if (c == dma_sec - 1 && nvm_cmd->force_sync_md)
+            direction = (nvm_cmd->cmdtype == MMGR_READ_PG)
+                                      ? NVM_DMA_SYNC_READ : NVM_DMA_SYNC_WRITE;
+
         ret = nvm_dma ((void *)(dma->virt_addr +
                                 nvm_cmd->sec_sz * c), prp, dma_sz, direction);
         if (ret) break;
@@ -447,8 +451,10 @@ static void volt_execute_io (struct ox_mq_entry *req)
 
     ret = volt_process_io(cmd);
 
-    if (ret) {
-        log_err ("[ERROR: Cmd %x not completed. Aborted.]\n", cmd->cmdtype);
+    if (ret && core.debug) {
+        log_err ("[volt: Cmd 0x%x NOT completed. (%d/%d/%d/%d/%d)]\n",
+                cmd->cmdtype, cmd->ppa.g.ch, cmd->ppa.g.lun, cmd->ppa.g.blk,
+                cmd->ppa.g.pl, cmd->ppa.g.pg);
         cmd->status = NVM_IO_FAIL;
         goto COMPLETE;
     }

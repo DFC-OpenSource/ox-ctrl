@@ -24,6 +24,7 @@
 #define DFCNAND_LS2_DMA_DATA   (1 << 0)
 #define DFCNAND_LS2_DMA_OOB    (1 << 1)
 
+#define DFCNAND_QUEUE_SIZE     2048
 #define DFCNAND_QUEUE_TO       200000
 
 enum DFCNAND_COMMAND_ID {

@@ -175,6 +175,10 @@ OOB:
     if (nvm_cmd->md_prp && sec_map && nvm_cmd->cmdtype == MMGR_READ_PG)
         dfcnand_oob_reorder (oob_addr, sec_map);
 
+    if (nvm_cmd->force_sync_md)
+        direction = (nvm_cmd->cmdtype == MMGR_READ_PG)
+                                      ? NVM_DMA_SYNC_READ : NVM_DMA_SYNC_WRITE;
+
     /* Transfer the metadata if required */
     if ((cmd->dfc_io.local_dma & DFCNAND_LS2_DMA_OOB) && nvm_cmd->md_prp)
         if(nvm_dma ((void *)(oob_addr), nvm_cmd->md_prp,
@@ -245,7 +249,7 @@ static int dfcnand_start_mq (void)
 
     sprintf(mq_config.name, "%s", "DFCNAND_MMGR");
     mq_config.n_queues = dfcnand.geometry->n_of_ch;
-    mq_config.q_size = 64;
+    mq_config.q_size = DFCNAND_QUEUE_SIZE;
     mq_config.sq_fn = dfcnand_process_sq;
     mq_config.cq_fn = dfcnand_process_cq;
     mq_config.to_fn = dfcnand_process_to;
