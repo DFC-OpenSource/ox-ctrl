@@ -91,6 +91,24 @@ ERR:
     return NVME_INVALID_FIELD;
 }
 
+static void nvme_debug_print_io (NvmeRwCmd *cmd, uint32_t bs, uint64_t dt_sz,
+        uint64_t md_sz, uint64_t elba, uint64_t *prp)
+{
+    int i;
+
+    printf("  fuse: %d, psdt: %d\n", cmd->fuse, cmd->psdt);
+    printf("  number of LBAs: %d, bs: %d\n", cmd->nlb + 1, bs);
+    printf("  DMA size: %lu (data) + %lu (meta) = %lu bytes\n",
+                                                 dt_sz, md_sz, dt_sz + md_sz);
+    printf("  starting LBA: %lu, ending LBA: %lu\n", cmd->slba, elba);
+    printf("  meta_prp: 0x%016lx\n", cmd->mptr);
+
+    for (i = 0; i < cmd->nlb + 1; i++)
+        printf("  [prp(%d): 0x%016lx\n", i, prp[i]);
+
+    fflush (stdout);
+}
+
 uint16_t nvme_identify (NvmeCtrl *n, NvmeCmd *cmd)
 {
     NvmeNamespace *ns;
@@ -710,7 +728,7 @@ uint16_t nvme_rw (NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
 {
     NvmeRwCmd *rw = (NvmeRwCmd *)cmd;
     int i;
-    uint16_t ctrl = rw->control;
+
     uint32_t nlb  = rw->nlb + 1;
     uint64_t slba = rw->slba;
     uint64_t prp1 = rw->prp1;
@@ -719,69 +737,79 @@ uint16_t nvme_rw (NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd,
     const uint64_t elba = slba + nlb;
     const uint8_t lba_index = NVME_ID_NS_FLBAS_INDEX(ns->id_ns.flbas);
     const uint8_t data_shift = ns->id_ns.lbaf[lba_index].ds;
-    const uint16_t ms = ns->id_ns.lbaf[lba_index].ms;
     uint64_t data_size = nlb << data_shift;
-    uint64_t meta_size = nlb * ms;
-    uint64_t aio_slba =
-	ns->start_block + (slba << (data_shift - BDRV_SECTOR_BITS));
 
     req->nvm_io.status.status = NVM_IO_NEW;
 
     req->is_write = rw->opcode == NVME_CMD_WRITE;
-    if (elba > (ns->id_ns.nsze)) {
-    	nvme_set_error_page (n, req->sq->sqid, cmd->cid, NVME_LBA_RANGE,
-                                	offsetof(NvmeRwCmd, nlb), elba, ns->id);
+
+    if (elba > (ns->id_ns.nsze))
 	return NVME_LBA_RANGE | NVME_DNR;
-    }
-    if (n->id_ctrl.mdts && data_size > n->page_size * (1 << n->id_ctrl.mdts)) {
-	nvme_set_error_page (n, req->sq->sqid, cmd->cid, NVME_INVALID_FIELD,
-				offsetof(NvmeRwCmd, nlb), nlb, ns->id);
-	return NVME_INVALID_FIELD | NVME_DNR;
-    }
-    if (meta_size) {
-	nvme_set_error_page (n, req->sq->sqid, cmd->cid, NVME_INVALID_FIELD,
-				offsetof(NvmeRwCmd, control), ctrl, ns->id);
-	return NVME_INVALID_FIELD | NVME_DNR;
-    }
-    if ((ctrl & NVME_RW_PRINFO_PRACT) && !(ns->id_ns.dps & DPS_TYPE_MASK)) {
-	nvme_set_error_page (n, req->sq->sqid, cmd->cid, NVME_INVALID_FIELD,
-			offsetof(NvmeRwCmd, control), ctrl, ns->id);
-	return NVME_INVALID_FIELD | NVME_DNR;
-    }
 
-    /* TODO: Map PRPs for non-sequential prp addresses */
-#if 0
-    if (nvme_map_prp (req, prp1, prp2, data_size, n)) {
+    if (n->id_ctrl.mdts && data_size > n->page_size * (1 << n->id_ctrl.mdts))
+	return NVME_LBA_RANGE | NVME_DNR;
+
+    if (nlb > 256)
+	return NVME_INVALID_FIELD | NVME_DNR;
+
+    /* Metadata disabled
+    const uint16_t ms = ns->id_ns.lbaf[lba_index].ms;
+    uint64_t meta_size = nlb * ms;
+    if (meta_size)
         return NVME_INVALID_FIELD | NVME_DNR;
-    }
-#endif /* MAP PRP */
+    */
 
-    req->slba = aio_slba;
+    /* End-to-end Data protection disabled
+    if ((ctrl & NVME_RW_PRINFO_PRACT) && !(ns->id_ns.dps & DPS_TYPE_MASK))
+        return NVME_INVALID_FIELD | NVME_DNR;
+    */
+
+    /* TODO: Map PRPs for SGL addresses */
+    switch (rw->psdt) {
+        case CMD_PSDT_PRP:
+        case CMD_PSDT_RSV:
+            req->nvm_io.prp[0] = prp1;
+
+            if (nlb == 2)
+                req->nvm_io.prp[1] = prp2;
+            else if (nlb > 2)
+                nvme_read_from_host((void *)(&req->nvm_io.prp[1]), prp2,
+                                                 (nlb - 1) * sizeof(uint64_t));
+            break;
+        case CMD_PSDT_SGL:
+        case CMD_PSDT_SGL_MD:
+            return NVME_INVALID_FORMAT;
+    }
+
+    req->slba = slba;
     req->meta_size = 0;
     req->status = NVME_SUCCESS;
     req->nlb = nlb;
     req->ns = ns;
     req->lba_index = lba_index;
 
+    req->nvm_io.cid = rw->cid;
     req->nvm_io.sec_sz = NVME_KERNEL_PG_SIZE;
+    req->nvm_io.md_sz = 0;
     req->nvm_io.cmdtype = (req->is_write) ? MMGR_WRITE_PG : MMGR_READ_PG;
     req->nvm_io.n_sec = nlb;
-    req->nvm_io.prp[0] = prp1;
     req->nvm_io.req = (void *) req;
-    req->nvm_io.slba = aio_slba;
+    req->nvm_io.slba = slba;
+
     req->nvm_io.status.pg_errors = 0;
     req->nvm_io.status.ret_t = 0;
     req->nvm_io.status.total_pgs = 0;
+    req->nvm_io.status.pgs_p = 0;
+    req->nvm_io.status.pgs_s = 0;
+    req->nvm_io.status.status = NVM_IO_NEW;
 
     for (i = 0; i < 8; i++) {
         req->nvm_io.status.pg_map[i] = 0;
     }
 
-    for (i = 0; i < 64; i++) {
-        req->nvm_io.mmgr_io[i].pg_index = i;
-        req->nvm_io.mmgr_io[i].nvm_io = &req->nvm_io;
-        req->nvm_io.mmgr_io[i].pg_sz = NVME_KERNEL_PG_SIZE;
-    }
+    if (core.debug)
+        nvme_debug_print_io (rw, req->nvm_io.sec_sz, data_size,
+                                     req->nvm_io.md_sz, elba, req->nvm_io.prp);
 
     return nvm_submit_ftl(&req->nvm_io);
 }
