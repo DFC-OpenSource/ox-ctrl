@@ -37,8 +37,6 @@
 #define __USE_GNU
 #endif
 
-#define LIGHTNVM            1
-
 #include <sys/queue.h>
 #include <stdint.h>
 #include <pthread.h>
@@ -61,10 +59,10 @@
 #define OX_LABEL    OX_VER "-" LABEL
 
 #define MAX_NAME_SIZE           31
-#define NVM_QUEUE_RETRY         16
-#define NVM_QUEUE_RETRY_SLEEP   500
-#define NVM_FTL_QUEUE_SIZE      64
-#define NVM_FTL_QUEUE_TO        1000000
+#define NVM_QUEUE_RETRY         1024
+#define NVM_QUEUE_RETRY_SLEEP   1000
+#define NVM_FTL_QUEUE_SIZE      512
+#define NVM_FTL_QUEUE_TO        4000000
 
 #define NVM_SYNCIO_TO          10
 #define NVM_SYNCIO_FLAG_BUF    0x1
@@ -86,7 +84,7 @@
 #define NVM_CH_IN_USE          0x3c
 
 #define FTL_ID_LNVM            0x1
-#define FTL_ID_STANDARD        FTL_ID_LNVM
+#define FTL_ID_APPNVM          0x2
 
 #define log_err(format, ...)         syslog(LOG_ERR, format, ## __VA_ARGS__)
 #define log_info(format, ...)        syslog(LOG_INFO, format, ## __VA_ARGS__)
@@ -95,6 +93,12 @@
         (usec) = ((tve).tv_sec*(uint64_t)1000000+(tve).tv_usec) -       \
         ((tvs).tv_sec*(uint64_t)1000000+(tvs).tv_usec);                 \
 } while ( 0 )
+
+#undef	MAX
+#define MAX(a, b)  (((a) > (b)) ? (a) : (b))
+
+#undef	MIN
+#define MIN(a, b)  (((a) < (b)) ? (a) : (b))
 
 struct nvm_ppa_addr {
     /* Generic structure for all addresses */
@@ -147,6 +151,7 @@ struct nvm_mmgr_io_cmd {
     uint32_t                sec_sz;
     uint32_t                md_sz;
     uint16_t                sec_offset; /* first sector in the ppa vector */
+    uint8_t                 force_sync_md;
     atomic_t                *sync_count;
     pthread_mutex_t         *sync_mutex;
     struct timeval          tstart;
@@ -164,13 +169,14 @@ struct nvm_io_cmd {
     struct nvm_mmgr_io_cmd      mmgr_io[64];
     void                        *req;
     void                        *mq_req;
-    uint64_t                    prp[64];
-    uint64_t                    md_prp[64];
+    uint64_t                    prp[256]; /* maximum 1 MB for block I/O */
+    uint64_t                    md_prp[256];
     uint32_t                    sec_sz;
     uint32_t                    md_sz;
     uint32_t                    n_sec;
     uint64_t                    slba;
     uint8_t                     cmdtype;
+    pthread_mutex_t             mutex;
 };
 
 #include "nvme.h"
@@ -189,11 +195,13 @@ enum {
 };
 
 enum {
-    MMGR_READ_PG =   0x1,
-    MMGR_READ_OOB =  0x2,
-    MMGR_WRITE_PG =  0x3,
-    MMGR_BAD_BLK =   0x5,
+    MMGR_READ_PG   = 0x1,
+    MMGR_READ_OOB  = 0x2,
+    MMGR_WRITE_PG  = 0x3,
+    MMGR_BAD_BLK   = 0x5,
     MMGR_ERASE_BLK = 0x7,
+    MMGR_READ_SGL  = 0x8,
+    MMGR_WRITE_SGL = 0x9
 };
 
 enum NVM_ERROR {
@@ -223,6 +231,7 @@ enum RUN_FLAGS {
     RUN_PCIE       = 1 << 4,
     RUN_NVME       = 1 << 5,
     RUN_TESTS      = 1 << 6,
+    RUN_APPNVM     = 1 << 7
 };
 
 struct nvm_mmgr;
@@ -251,6 +260,31 @@ struct nvm_mmgr_geometry {
     uint8_t     n_of_planes;
     uint32_t    pg_size;
     uint32_t    sec_oob_sz;
+
+    /* calculated values */
+    uint32_t    sec_per_pl_pg;
+    uint32_t    sec_per_blk;
+    uint32_t    sec_per_lun;
+    uint32_t    sec_per_ch;
+    uint32_t    pg_per_lun;
+    uint32_t    pg_per_ch;
+    uint32_t    blk_per_ch;
+    uint64_t    tot_sec;
+    uint64_t    tot_pg;
+    uint32_t    tot_blk;
+    uint32_t    tot_lun;
+    uint32_t    sec_size;
+    uint32_t    pl_pg_size;
+    uint32_t    blk_size;
+    uint64_t    lun_size;
+    uint64_t    ch_size;
+    uint64_t    tot_size;
+    uint32_t    pg_oob_sz;
+    uint32_t    pl_pg_oob_sz;
+    uint32_t    blk_oob_sz;
+    uint32_t    lun_oob_sz;
+    uint64_t    ch_oob_sz;
+    uint64_t    tot_oob_sz;
 };
 
 struct nvm_mmgr {
@@ -284,15 +318,38 @@ struct nvm_pcie {
     uint8_t                     running;
 };
 
+struct nvm_ftl_cap_get_bbtbl_st {
+    struct nvm_ppa_addr ppa;
+    uint8_t             *bbtbl;
+    uint32_t            nblk;
+    uint16_t            bb_format;
+};
+
+struct nvm_ftl_cap_set_bbtbl_st {
+    struct nvm_ppa_addr ppa;
+    uint8_t             value;
+    uint16_t            bb_format;
+};
+
+struct nvm_ftl_cap_gl_fn {
+    uint16_t            ftl_id;
+    uint16_t            fn_id;
+    void                *arg;
+};
+
 /* --- FTL CAPABILITIES BIT OFFSET --- */
 
 enum {
     /* Get/Set Bad Block Table support */
-    FTL_CAP_GET_BBTBL     = 0x00,
-    FTL_CAP_SET_BBTBL     = 0x01,
+    FTL_CAP_GET_BBTBL           = 0x00,
+    FTL_CAP_SET_BBTBL           = 0x01,
     /* Get/Set Logical to Physical Table support */
-    FTL_CAP_GET_L2PTBL    = 0x02,
-    FTL_CAP_SET_L2PTBL    = 0x03,
+    FTL_CAP_GET_L2PTBL          = 0x02,
+    FTL_CAP_SET_L2PTBL          = 0x03,
+    /* Application function support */
+    FTL_CAP_INIT_FN             = 0x04,
+    FTL_CAP_EXIT_FN             = 0x05,
+    FTL_CAP_CALL_FN             = 0X06
 };
 
 /* --- FTL BAD BLOCK TABLE FORMATS --- */
@@ -308,9 +365,12 @@ struct nvm_ftl;
 typedef int       (nvm_ftl_submit_io)(struct nvm_io_cmd *);
 typedef void      (nvm_ftl_callback_io)(struct nvm_mmgr_io_cmd *);
 typedef int       (nvm_ftl_init_channel)(struct nvm_channel *);
-typedef void      (nvm_ftl_exit)(struct nvm_ftl *);
+typedef void      (nvm_ftl_exit)(void);
 typedef int       (nvm_ftl_get_bbtbl)(struct nvm_ppa_addr *,uint8_t *,uint32_t);
 typedef int       (nvm_ftl_set_bbtbl)(struct nvm_ppa_addr *, uint8_t);
+typedef int       (nvm_ftl_init_fn)(uint16_t, void *arg);
+typedef void      (nvm_ftl_exit_fn)(uint16_t);
+typedef int       (nvm_ftl_call_fn)(uint16_t, void *arg);
 
 struct nvm_ftl_ops {
     nvm_ftl_submit_io      *submit_io; /* FTL queue request consumer */
@@ -319,6 +379,9 @@ struct nvm_ftl_ops {
     nvm_ftl_exit           *exit;
     nvm_ftl_get_bbtbl      *get_bbtbl;
     nvm_ftl_set_bbtbl      *set_bbtbl;
+    nvm_ftl_init_fn        *init_fn;
+    nvm_ftl_exit_fn        *exit_fn;
+    nvm_ftl_call_fn        *call_fn;
 };
 
 struct nvm_ftl {
@@ -329,7 +392,7 @@ struct nvm_ftl {
     uint16_t                bbtbl_format;
     uint8_t                 nq; /* Number of queues/threads, up to 64 per FTL */
     struct ox_mq            *mq;
-    uint16_t                next_queue;
+    uint16_t                next_queue[2];
     LIST_ENTRY(nvm_ftl)     entry;
 };
 
@@ -374,6 +437,10 @@ struct nvm_gengeo {
 #define CMDARG_FLAG_S       (1 << 1)
 #define CMDARG_FLAG_T       (1 << 2)
 #define CMDARG_FLAG_L       (1 << 3)
+#define CMDARG_FLAG_B       (1 << 4)
+#define CMDARG_FLAG_F       (1 << 5)
+#define CMDARG_FLAG_O       (1 << 6)
+#define CMDARG_FLAG_G       (1 << 7)
 
 #define OX_RUN_MODE         0x0
 #define OX_TEST_MODE        0x1
@@ -423,6 +490,10 @@ struct core_struct {
     jmp_buf                 jump;
     uint8_t                 run_flag;
     uint8_t                 debug;
+    uint8_t                 ftl_debug;
+    uint16_t                std_ftl;
+    uint8_t                 lnvm;
+    uint8_t                 volt;
     uint8_t                 null;
     struct nvm_pcie         *nvm_pcie;
     struct nvm_channel      **nvm_ch;
@@ -443,7 +514,7 @@ void nvm_callback (struct nvm_mmgr_io_cmd *);
 int  nvm_dma (void *, uint64_t, ssize_t, uint8_t);
 int  nvm_memcheck (void *);
 int  nvm_contains_ppa (struct nvm_ppa_addr *, uint32_t, struct nvm_ppa_addr);
-int  nvm_ftl_cap_exec (uint8_t, void **, int);
+int  nvm_ftl_cap_exec (uint8_t, void *);
 int  nvm_init_ctrl (int, char **);
 int  nvm_test_unit (struct nvm_init_arg *);
 int  nvm_submit_sync_io (struct nvm_channel *, struct nvm_mmgr_io_cmd *,
@@ -457,6 +528,7 @@ int mmgr_volt_init(void);
 
 /* FTLs init function */
 int ftl_lnvm_init(void);
+int ftl_appnvm_init(void);
 
 /* nvme functions */
 int  nvme_init(struct NvmeCtrl *);

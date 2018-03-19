@@ -39,7 +39,6 @@
 #include <math.h>
 #include "include/ssd.h"
 
-#if LIGHTNVM
 #include "include/lightnvm.h"
 #include "include/uatomic.h"
 
@@ -54,9 +53,6 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
                uint64_t *md_prp, uint16_t size, uint64_t dt_sz, uint64_t md_sz)
 {
     int i;
-    char buf[4096];
-
-    setbuffer (stdout, buf, 4096);
 
     printf(" Number of sectors: %d\n", size);
     printf(" DMA size: %lu (data) + %lu (meta) = %lu bytes\n",
@@ -69,7 +65,6 @@ static void lnvm_debug_print_io (struct nvm_ppa_addr *list, uint64_t *prp,
     printf (" [meta_prp(0): 0x%016lx\n", md_prp[0]);
 
     fflush (stdout);
-    setlinebuf (stdout);
 }
 
 void lnvm_set_default(LnvmCtrl *ctrl)
@@ -140,9 +135,9 @@ out:
 uint16_t lnvm_set_bb_tbl(NvmeCtrl *n, NvmeCmd *nvmecmd, NvmeRequest *req)
 {
     LnvmSetBBTbl *cmd = (LnvmSetBBTbl*)nvmecmd;
+    struct nvm_ftl_cap_set_bbtbl_st arg;
     struct nvm_ppa_addr *psl;
     uint16_t bbtbl_format = FTL_BBTBL_BYTE;
-    void *arg[4];
     int i, ret;
 
     uint64_t spba = cmd->spba;
@@ -162,11 +157,11 @@ uint16_t lnvm_set_bb_tbl(NvmeCtrl *n, NvmeCmd *nvmecmd, NvmeRequest *req)
     for(i = 0; i < nlb; i++) {
         /* set single block to FTL */
         psl[i].g.sec = 0;
-        arg[0] = &psl[i].ppa;
-        arg[1] = &value;
-        arg[2] = &bbtbl_format;
+        arg.ppa.ppa = psl[i].ppa;
+        arg.value = value;
+        arg.bb_format = bbtbl_format;
 
-        ret = nvm_ftl_cap_exec(FTL_CAP_SET_BBTBL, arg, 3);
+        ret = nvm_ftl_cap_exec(FTL_CAP_SET_BBTBL, (void *) &arg);
         if (ret)
             return NVME_INVALID_FIELD;
     }
@@ -176,9 +171,9 @@ uint16_t lnvm_set_bb_tbl(NvmeCtrl *n, NvmeCmd *nvmecmd, NvmeRequest *req)
 
 uint16_t lnvm_get_bb_tbl(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
 {
-    NvmeNamespace *ns;
     LnvmCtrl *ln;
     LnvmIdGroup *c;
+    struct nvm_ftl_cap_get_bbtbl_st arg;
     LnvmGetBBTbl *bbtbl = (LnvmGetBBTbl*)cmd;
 
     uint32_t nsid = bbtbl->nsid;
@@ -187,7 +182,6 @@ uint16_t lnvm_get_bb_tbl(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     uint32_t nr_blocks;
     LnvmBBTbl *bb_tbl;
     int ret = NVME_SUCCESS;
-    void *arg[4];
     uint16_t bbtbl_format = FTL_BBTBL_BYTE;
 
     if (nsid == 0 || nsid > n->num_namespaces) {
@@ -195,7 +189,6 @@ uint16_t lnvm_get_bb_tbl(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     }
 
     ppa.ppa= bbtbl->spba;
-    ns = &n->namespaces[nsid - 1];
     ln = &n->lightnvm_ctrl;
     c = &ln->id_ctrl.groups[0];
 
@@ -217,12 +210,12 @@ uint16_t lnvm_get_bb_tbl(NvmeCtrl *n, NvmeCmd *cmd, NvmeRequest *req)
     bb_tbl->tblks = nr_blocks;
 
     /* read bb_tbl from FTL */
-    arg[0] = &ppa;
-    arg[1] = bb_tbl->blk;
-    arg[2] = &nr_blocks;
-    arg[3] = &bbtbl_format;
+    arg.ppa.ppa = ppa.ppa;
+    arg.bbtbl = bb_tbl->blk;
+    arg.nblk = nr_blocks;
+    arg.bb_format = bbtbl_format;
 
-    ret = nvm_ftl_cap_exec(FTL_CAP_GET_BBTBL, arg, 4);
+    ret = nvm_ftl_cap_exec(FTL_CAP_GET_BBTBL, (void *) &arg);
     if (ret)
         goto clean;
 
@@ -358,7 +351,6 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
         psl[0].ppa = spba;
     }
 
-    req->lightnvm_slba = lrw->slba;
     req->is_write = is_write;
 
     sppa = eppa = nvme_gen_to_dev_addr(ln, &psl[0]);
@@ -549,25 +541,27 @@ int lnvm_init(NvmeCtrl *n)
         ln->params.sec_per_lun = ln->params.sec_per_blk * c->num_blk;
         ln->params.sec_per_log_pl = ln->params.sec_per_lun * c->num_lun;
         ln->params.total_secs = ln->params.sec_per_log_pl;
-    }
 
-    log_info("    [lnvm: Channels: %d]\n",c->num_ch);
-    log_info("    [lnvm: LUNs per Channel: %d]\n",c->num_lun);
-    log_info("    [lnvm: Blocks per LUN: %d]\n",c->num_blk);
-    log_info("    [lnvm: Pages per Block: %d]\n",c->num_pg);
-    log_info("    [lnvm: Planes: %d]\n",c->num_pln);
-    log_info("    [lnvm: Total Blocks: %lu]\n", tot_blks);
-    log_info("    [lnvm: Total Pages: %lu]\n",c->num_pg * tot_blks
+        log_info("   [lnvm: Namespace %d]\n",i);
+        log_info("    [lnvm: Channels: %d]\n",c->num_ch);
+        log_info("    [lnvm: LUNs per Channel: %d]\n",c->num_lun);
+        log_info("    [lnvm: Blocks per LUN: %d]\n",c->num_blk);
+        log_info("    [lnvm: Pages per Block: %d]\n",c->num_pg);
+        log_info("    [lnvm: Planes: %d]\n",c->num_pln);
+        log_info("    [lnvm: Total Blocks: %lu]\n", tot_blks);
+        log_info("    [lnvm: Total Pages: %lu]\n",c->num_pg * tot_blks
                                                                 * c->num_pln);
-    log_info("    [lnvm: Page size: %d bytes]\n",c->fpg_sz);
-    log_info("    [lnvm: Plane Page size: %d bytes]\n",c->fpg_sz
+        log_info("    [lnvm: Page size: %d bytes]\n",c->fpg_sz);
+        log_info("    [lnvm: Plane Page size: %d bytes]\n",c->fpg_sz
                                                                 * c->num_pln);
-    log_info("    [lnvm: Total: %lu MB]\n",(((c->fpg_sz & 0xffffffff)
+        log_info("    [lnvm: Total: %lu MB]\n",(((c->fpg_sz & 0xffffffff)
                           / 1024) * c->num_pg * c->num_pln * tot_blks) / 1024);
-    log_info("    [lnvm: Total Available: %lu MB]\n",
+        log_info("    [lnvm: Total Available: %lu MB]\n",
                   (((c->fpg_sz & 0xffffffff) / 1024) * c->num_pg * c->num_pln *
                   (tot_blks - rsv_blks)) / 1024);
+    }
+
+    syslog (LOG_INFO,"  [nvm: LightNVM is registered]\n");
 
     return 0;
 }
-#endif /* LIGHTNVM */

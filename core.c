@@ -95,8 +95,80 @@ int nvm_register_pcie_handler (struct nvm_pcie *pcie)
     return 0;
 }
 
+static void nvm_calc_print_geo (struct nvm_mmgr_geometry *g)
+{
+    g->sec_per_pl_pg = g->sec_per_pg * g->n_of_planes;
+    g->sec_per_blk = g->sec_per_pl_pg * g->pg_per_blk;
+    g->sec_per_lun = g->sec_per_blk * g->blk_per_lun;
+    g->sec_per_ch = g->sec_per_lun * g->lun_per_ch;
+    g->pg_per_lun = g->pg_per_blk * g->blk_per_lun;
+    g->pg_per_ch = g->pg_per_lun * g->lun_per_ch;
+    g->blk_per_ch = g->blk_per_lun * g->lun_per_ch;
+    g->tot_sec = g->sec_per_ch * g->n_of_ch;
+    g->tot_pg = g->pg_per_ch * g->n_of_ch;
+    g->tot_blk = g->blk_per_ch * g->n_of_ch;
+    g->tot_lun = g->lun_per_ch * g->n_of_ch;
+    g->sec_size = g->pg_size / g->sec_per_pg;
+    g->pl_pg_size = g->pg_size * g->n_of_planes;
+    g->blk_size = g->pl_pg_size * g->pg_per_blk;
+    g->lun_size = g->blk_size * g->blk_per_lun;
+    g->ch_size = g->lun_size * g->lun_per_ch;
+    g->tot_size = g->ch_size * g->n_of_ch;
+    g->pg_oob_sz = g->sec_oob_sz * g->sec_per_pg;
+    g->pl_pg_oob_sz = g->pg_oob_sz * g->n_of_planes;
+    g->blk_oob_sz = g->pl_pg_oob_sz * g->pg_per_blk;
+    g->lun_oob_sz = g->blk_oob_sz * g->blk_per_lun;
+    g->ch_oob_sz = g->lun_oob_sz * g->lun_per_ch;
+    g->tot_oob_sz = g->ch_oob_sz * g->n_of_ch;
+
+    log_info ("   [n_of_planes   = %d]", g->n_of_planes);
+    log_info ("   [n_of_channels = %d]", g->n_of_ch);
+    log_info ("   [sec_per_pg    = %d]", g->sec_per_pg);
+    log_info ("   [sec_per_pl_pg = %d]", g->sec_per_pl_pg);
+    log_info ("   [sec_per_blk   = %d]", g->sec_per_blk);
+    log_info ("   [sec_per_lun   = %d]", g->sec_per_lun);
+    log_info ("   [sec_per_ch    = %d]", g->sec_per_ch);
+    log_info ("   [tot_sec       = %lu]", g->tot_sec);
+    log_info ("   [pg_per_blk    = %d]", g->pg_per_blk);
+    log_info ("   [pg_per_lun    = %d]", g->pg_per_lun);
+    log_info ("   [pg_per_ch     = %d]", g->pg_per_ch);
+    log_info ("   [tot_pg        = %lu]", g->tot_pg);
+    log_info ("   [blk_per_lun   = %d]", g->blk_per_lun);
+    log_info ("   [blk_per_ch    = %d]", g->blk_per_ch);
+    log_info ("   [tot_blk       = %d]", g->tot_blk);
+    log_info ("   [lun_per_ch    = %d]", g->lun_per_ch);
+    log_info ("   [tot_lun       = %d]", g->tot_lun);
+    log_info ("   [sector_size   = %d bytes, %d KB]",
+                                              g->sec_size, g->sec_size / 1024);
+    log_info ("   [page_size     = %d bytes, %d KB]",
+                                                g->pg_size, g->pg_size / 1024);
+    log_info ("   [pl_page_size  = %d bytes, %d KB]",
+                                          g->pl_pg_size, g->pl_pg_size / 1024);
+    log_info ("   [blk_size      = %d bytes, %d MB]",
+                                       g->blk_size, g->blk_size / 1024 / 1024);
+    log_info ("   [lun_size      = %lu bytes, %lu MB]",
+                                       g->lun_size, g->lun_size / 1024 / 1024);
+    log_info ("   [ch_size       = %lu bytes, %lu MB]",
+                                         g->ch_size, g->ch_size / 1024 / 1024);
+    log_info ("   [tot_size      = %lu bytes, %lu GB]",
+                                g->tot_size, g->tot_size / 1024 / 1024 / 1024);
+    log_info ("   [sec_oob_sz    = %d bytes]", g->sec_oob_sz);
+    log_info ("   [pg_oob_sz     = %d bytes]", g->pg_oob_sz);
+    log_info ("   [pl_pg_oob_sz  = %d bytes]", g->pl_pg_oob_sz);
+    log_info ("   [blk_oob_sz    = %d bytes, %d KB]",
+                                          g->blk_oob_sz, g->blk_oob_sz / 1024);
+    log_info ("   [lun_oob_sz    = %d bytes, %d KB]",
+                                          g->lun_oob_sz, g->lun_oob_sz / 1024);
+    log_info ("   [ch_oob_sz     = %lu bytes, %lu KB]",
+                                            g->ch_oob_sz, g->ch_oob_sz / 1024);
+    log_info ("   [tot_oob_sz    = %lu bytes, %lu MB]",
+                                   g->tot_oob_sz, g->tot_oob_sz / 1024 / 1024);
+}
+
 int nvm_register_mmgr (struct nvm_mmgr *mmgr)
 {
+    struct nvm_mmgr_geometry *g = mmgr->geometry;
+
     if (strlen(mmgr->name) > MAX_NAME_SIZE)
         return EMAX_NAME_SIZE;
 
@@ -112,6 +184,8 @@ int nvm_register_mmgr (struct nvm_mmgr *mmgr)
     core.nvm_ch_count += mmgr->geometry->n_of_ch;
 
     log_info("  [nvm: Media Manager registered: %s]\n", mmgr->name);
+
+    nvm_calc_print_geo (g);
 
     return 0;
 }
@@ -132,12 +206,22 @@ static uint16_t nvm_ftl_q_schedule (struct nvm_ftl *ftl,
 {
     uint16_t qid;
 
+    /* Separate writes and reads in different queues for AppNVM FTL */
+    if (ftl->ftl_id == FTL_ID_APPNVM) {
+        qid = (cmd->cmdtype == MMGR_WRITE_PG) ? 0 : 1;
+
+        ftl->next_queue[qid] = (ftl->next_queue[qid] + 1 == ftl->nq / 2) ?
+                                                  0 : ftl->next_queue[qid] + 1;
+
+        return ftl->next_queue[qid] + (qid * (ftl->nq / 2));
+    }
+
     if (!multi_ch)
         return cmd->channel[0]->ch_id % ftl->nq;
     else {
-        qid = ftl->next_queue;
-        ftl->next_queue = (ftl->next_queue + 1 == ftl->nq) ?
-                                                       0 : ftl->next_queue + 1;
+        qid = ftl->next_queue[0];
+        ftl->next_queue[0] = (ftl->next_queue[0] + 1 == ftl->nq) ?
+                                                    0 : ftl->next_queue[0] + 1;
         return qid;
     }
 }
@@ -177,13 +261,27 @@ static void nvm_ftl_process_sq (struct ox_mq_entry *req)
 {
     struct nvm_io_cmd *cmd = (struct nvm_io_cmd *) req->opaque;
     struct nvm_ftl *ftl = cmd->channel[0]->ftl;
-    int ret;
+    int ret, retry;
 
     cmd->mq_req = (void *) req;
-    ret = ftl->ops->submit_io(cmd);
+
+    retry = NVM_QUEUE_RETRY;
+    do {
+        ret = ftl->ops->submit_io(cmd);
+        if (ret) {
+            retry--;
+            usleep (NVM_QUEUE_RETRY_SLEEP);
+            if (retry) {
+                cmd->status.nvme_status = NVME_SUCCESS;
+                cmd->status.status = NVM_IO_PROCESS;
+            }
+        }
+    } while (ret && retry);
 
     if (ret) {
-        log_err ("[ERROR: Cmd %x not completed. Aborted.]\n", cmd->cmdtype);
+        if (core.debug)
+            log_err ("[ftl: Cmd %lu (0x%x) NOT completed. ret %d]\n",
+                                                   cmd->cid,cmd->cmdtype, ret);
         nvm_complete_ftl(cmd);
     }
 }
@@ -202,7 +300,7 @@ static void nvm_ftl_process_to (void **opaque, int counter)
     while (counter) {
         counter--;
         cmd = (struct nvm_io_cmd *) opaque[counter];
-        cmd->status.status = NVM_IO_FAIL;
+        cmd->status.status = NVM_IO_TIMEOUT;
         cmd->status.nvme_status = NVME_MEDIA_TIMEOUT;
     }
 }
@@ -227,7 +325,8 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
     if (!ftl->mq)
         return EFTL_REGISTER;
 
-    ftl->next_queue = 0;
+    ftl->next_queue[0] = 0;
+    ftl->next_queue[1] = 0;
 
     core.ftl_q_count += ftl->nq;
 
@@ -243,6 +342,10 @@ int nvm_register_ftl (struct nvm_ftl *ftl)
         log_info("    [%s cap: Get Logical to Physical Table]\n", ftl->name);
     if (ftl->cap & 1 << FTL_CAP_GET_L2PTBL)
         log_info("    [%s cap: Set Logical to Physical Table]\n", ftl->name);
+    if (ftl->cap & 1 << FTL_CAP_INIT_FN)
+        log_info("    [%s cap: Application Function Init]\n", ftl->name);
+    if (ftl->cap & 1 << FTL_CAP_EXIT_FN)
+        log_info("    [%s cap: Application Function Exit]\n", ftl->name);
 
     if (ftl->bbtbl_format == FTL_BBTBL_BYTE)
         log_info("    [%s Bad block table type: Byte array. 1 byte per blk.]\n",
@@ -286,7 +389,7 @@ void nvm_callback (struct nvm_mmgr_io_cmd *cmd)
 int nvm_submit_ftl (struct nvm_io_cmd *cmd)
 {
     struct nvm_ftl *ftl;
-    int ret, retry, i, qid;
+    int ret, retry, qid, i;
     uint8_t ch_ppa[core.nvm_ch_count];
     uint8_t multi_ch = 0;
     NvmeRequest *req = (NvmeRequest *) cmd->req;
@@ -312,47 +415,51 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
             return NVME_CMD_ABORT_REQ;
     }
 
-#if LIGHTNVM
-    /* For now, the host ppa channel must be aligned with core.nvm_ch[] */
-    /* All PPAs in the vector must address channels managed by the same FTL */
-    if (cmd->ppalist[0].g.ch >= core.nvm_ch_count)
-        goto CH_ERR;
-
-    ftl = core.nvm_ch[cmd->ppalist[0].g.ch]->ftl;
-
-    memset (ch_ppa, 0, sizeof (uint8_t) * core.nvm_ch_count);
-
-    /* Per PPA checking */
-    for (i = 0; i < cmd->n_sec; i++) {
-        if (cmd->ppalist[i].g.ch >= core.nvm_ch_count)
+    if (core.lnvm) {
+        /*For now, the host ppa channel must be aligned with core.nvm_ch[] */
+        /*All PPAs in the vector must address channels managed by the same FTL*/
+        if (cmd->ppalist[0].g.ch >= core.nvm_ch_count)
             goto CH_ERR;
 
-        ch_ppa[cmd->ppalist[i].g.ch]++;
+        ftl = core.nvm_ch[cmd->ppalist[0].g.ch]->ftl;
 
-        if (!multi_ch && cmd->ppalist[i].g.ch != cmd->ppalist[0].g.ch)
-            multi_ch++;
+        memset (ch_ppa, 0, sizeof (uint8_t) * core.nvm_ch_count);
 
-        if (core.nvm_ch[cmd->ppalist[i].g.ch]->ftl != ftl)
-            goto FTL_ERR;
+        /* Per PPA checking */
+        for (i = 0; i < cmd->n_sec; i++) {
+            if (cmd->ppalist[i].g.ch >= core.nvm_ch_count)
+                goto CH_ERR;
 
-        /* Set channel per PPA */
-        cmd->channel[i] = core.nvm_ch[cmd->ppalist[i].g.ch];
-    }
+            ch_ppa[cmd->ppalist[i].g.ch]++;
 
-#else
-    /* For now all channels must be included in the global namespace */
-    for (i = 0; i < core.nvm_ch_count; i++) {
-        if (cmd->slba >= core.nvm_ch[i]->slba && cmd->slba <=
-                                                        core.nvm_ch[i]->elba) {
-            ch = core.nvm_ch[i];
-            break;
+            if (!multi_ch && cmd->ppalist[i].g.ch != cmd->ppalist[0].g.ch)
+                multi_ch++;
+
+            if (core.nvm_ch[cmd->ppalist[i].g.ch]->ftl != ftl)
+                goto FTL_ERR;
+
+            /* Set channel per PPA */
+            cmd->channel[i] = core.nvm_ch[cmd->ppalist[i].g.ch];
         }
-        syslog(LOG_INFO,"[nvm ERROR: IO failed, channel not found.]\n");
-        req->status = NVME_CMD_ABORT_REQ;
-        nvm_complete_to_host(cmd);
-        return NVME_CMD_ABORT_REQ;
+
+    } else {
+
+        /* For now all channels must be included in the global namespace */
+        if ((cmd->slba > (core.nvm_ns_size / cmd->sec_sz)) ||
+                (cmd->slba + (cmd->sec_sz * cmd->n_sec) > core.nvm_ns_size)) {
+            syslog(LOG_INFO,"[nvm: IO out of bounds.]\n");
+            req->status = NVME_LBA_RANGE;
+            nvm_complete_to_host(cmd);
+            return NVME_LBA_RANGE;
+        }
+
+        cmd->channel[0] = core.nvm_ch[cmd->slba /
+                                       (core.nvm_ns_size / core.nvm_ch_count)];
+        multi_ch++;
+
+        ftl = nvm_get_ftl_instance(core.std_ftl);
+
     }
-#endif /* LIGHTNVM */
 
     cmd->status.status = NVM_IO_PROCESS;
     retry = NVM_QUEUE_RETRY;
@@ -361,14 +468,21 @@ int nvm_submit_ftl (struct nvm_io_cmd *cmd)
     do {
         ret = ox_mq_submit_req(ftl->mq, qid, cmd);
 
-        if (ret)
+        if (ret) {
+
             retry--;
-        else if (core.debug) {
+            usleep (NVM_QUEUE_RETRY_SLEEP);
+
+        } else if (core.debug) {
+
             printf(" CMD cid: %lu, type: 0x%x submitted to FTL. "
                                "FTL queue: %d\n", cmd->cid, cmd->cmdtype, qid);
-            for (i = 0; i < core.nvm_ch_count; i++)
-                if (ch_ppa[i] > 0)
-                    printf("  Channel: %d, PPAs: %d\n", i, ch_ppa[i]);
+            if (core.lnvm) {
+                for (i = 0; i < core.nvm_ch_count; i++)
+                    if (ch_ppa[i] > 0)
+                        printf("  Channel: %d, PPAs: %d\n", i, ch_ppa[i]);
+            }
+
         }
     } while (ret && retry);
 
@@ -490,10 +604,20 @@ static int nvm_sync_io_prepare (struct nvm_channel *ch,
         flags |= NVM_SYNCIO_FLAG_BUF;
     }
 
-    for (i = 0; i < cmd->n_sectors; i++) {
-        cmd->prp[i] = (uint64_t) buf + cmd->sec_sz * i;
+    if (cmd->cmdtype == MMGR_READ_SGL || cmd->cmdtype == MMGR_WRITE_SGL) {
+
+        for (i = 0; i < cmd->n_sectors; i++)
+            cmd->prp[i] = (uint64_t) ((uint8_t **) buf)[i];
+        cmd->md_prp = (uint64_t) ((uint8_t **) buf)[cmd->n_sectors];
+        cmd->cmdtype = (cmd->cmdtype == MMGR_READ_SGL) ?
+                                                  MMGR_READ_PG : MMGR_WRITE_PG;
+    } else {
+
+        for (i = 0; i < cmd->n_sectors; i++)
+            cmd->prp[i] = (uint64_t) buf + cmd->sec_sz * i;
+        cmd->md_prp = (uint64_t) buf + cmd->sec_sz * cmd->n_sectors;
+
     }
-    cmd->md_prp = (uint64_t) buf + cmd->sec_sz * cmd->n_sectors;
 
 OUT:
     return 0;
@@ -539,7 +663,7 @@ int nvm_submit_sync_io (struct nvm_channel *ch, struct nvm_mmgr_io_cmd *cmd,
 
     gettimeofday(&cmd->tstart,NULL);
 
-    switch (cmdtype) {
+    switch (cmd->cmdtype) {
         case MMGR_READ_PG:
             ret = mmgr->ops->read_pg(cmd);
             break;
@@ -665,7 +789,7 @@ static void nvm_unregister_ftl (struct nvm_ftl *ftl)
     ox_mq_destroy(ftl->mq);
     core.ftl_q_count -= ftl->nq;
 
-    ftl->ops->exit(ftl);
+    ftl->ops->exit();
     LIST_REMOVE(ftl, entry);
     core.ftl_count--;
     log_info(" [nvm: FTL (%s)(%d) unregistered.]\n", ftl->name, ftl->ftl_id);
@@ -696,7 +820,7 @@ static int nvm_ch_config ()
                 ch->i.in_use = NVM_CH_IN_USE;
                 ch->i.ns_id = 0x1;
                 ch->i.ns_part = c;
-                ch->i.ftl_id = FTL_ID_STANDARD;
+                ch->i.ftl_id = core.std_ftl;
 
                 /* FLush new config to NVM */
                 mmgr->ops->set_ch_info(ch, 1);
@@ -721,84 +845,133 @@ static int nvm_ch_config ()
         }
     }
 
+#ifdef CONFIG_FTL_APPNVM
+    /* APPNVM Global Init */
+    struct nvm_ftl_cap_gl_fn app_gl;
+    app_gl.arg = NULL;
+    app_gl.ftl_id = FTL_ID_APPNVM;
+    app_gl.fn_id = 0;
+    if (nvm_ftl_cap_exec(FTL_CAP_INIT_FN, &app_gl))
+        return -1;
+    core.run_flag |= RUN_APPNVM;
+#endif
+
     return 0;
 }
 
-static int nvm_ftl_cap_get_bbtbl (struct nvm_ppa_addr *ppa,
-                                            struct nvm_channel *ch, void **arg)
+static int nvm_ftl_cap_get_bbtbl (struct nvm_channel *ch,
+                                          struct nvm_ftl_cap_get_bbtbl_st *arg)
 {
-    uint8_t  *bbtbl     = (uint8_t *)  arg[1];
-    uint32_t *nblk      = (uint32_t *) arg[2];
-    uint16_t *bb_format = (uint16_t *) arg[3];
-
-    if (*nblk < 1)
+    if (arg->nblk < 1)
         return -1;
 
-    if (ch->ftl->bbtbl_format == *bb_format)
-        return ch->ftl->ops->get_bbtbl(ppa, bbtbl, *nblk);
+    if (!ch->ftl->ops->get_bbtbl)
+        return -1;
+
+    if (ch->ftl->bbtbl_format == arg->bb_format)
+        return ch->ftl->ops->get_bbtbl(&arg->ppa, arg->bbtbl, arg->nblk);
 
     return -1;
 }
 
-static int nvm_ftl_cap_set_bbtbl (struct nvm_ppa_addr *ppa,
-                                            struct nvm_channel *ch, void **arg)
+static int nvm_ftl_cap_set_bbtbl (struct nvm_channel *ch,
+                                          struct nvm_ftl_cap_set_bbtbl_st *arg)
 {
-    uint8_t *value      = (uint8_t *)  arg[1];
-    uint16_t *bb_format = (uint16_t *) arg[2];
+    if (!ch->ftl->ops->set_bbtbl)
+        return -1;
 
-    if (ch->ftl->bbtbl_format == *bb_format)
-        return ch->ftl->ops->set_bbtbl(ppa, *value);
+    if (ch->ftl->bbtbl_format == arg->bb_format)
+        return ch->ftl->ops->set_bbtbl(&arg->ppa, arg->value);
 
     return -1;
 }
 
-int nvm_ftl_cap_exec (uint8_t cap, void **arg, int narg)
+static int nvm_ftl_cap_init_fn (struct nvm_ftl *ftl,
+                                                 struct nvm_ftl_cap_gl_fn *arg)
 {
-    struct nvm_ppa_addr *ppa;
+    if (!ftl->ops->init_fn)
+        return -1;
+
+    return ftl->ops->init_fn (arg->fn_id, arg->arg);
+}
+
+static int nvm_ftl_cap_exit_fn (struct nvm_ftl *ftl,
+                                                 struct nvm_ftl_cap_gl_fn *arg)
+{
+    if (!ftl->ops->exit_fn)
+        return -1;
+
+    ftl->ops->exit_fn (arg->fn_id);
+
+    return 0;
+}
+
+int nvm_ftl_cap_exec (uint8_t cap, void *arg)
+{
     struct nvm_channel *ch;
-    int i;
+    struct nvm_ftl_cap_set_bbtbl_st *set_bbtbl;
+    struct nvm_ftl_cap_get_bbtbl_st *get_bbtbl;
+    struct nvm_ftl_cap_gl_fn        *gl_fn;
+    struct nvm_ftl                  *ftl;
 
-    if (narg < 1)
-        goto OUT;
-
-    for (i = 0; i < narg; i++) {
-        if (nvm_memcheck(arg[i]))
-            goto OUT;
-    }
-
-    ppa = arg[0];
-    if (ppa->g.ch >= core.nvm_ch_count)
-        goto OUT;
-
-    ch = core.nvm_ch[ppa->g.ch];
-    if (nvm_memcheck(ch))
-        goto OUT;
+    if (!arg)
+        return -1;
 
     switch (cap) {
         case FTL_CAP_GET_BBTBL:
 
-            if (narg < 4 || nvm_memcheck(ch->ftl->ops->get_bbtbl))
+            get_bbtbl = (struct nvm_ftl_cap_get_bbtbl_st *) arg;
+            if (get_bbtbl->ppa.g.ch >= core.nvm_ch_count)
                 goto OUT;
+            ch = core.nvm_ch[get_bbtbl->ppa.g.ch];
             if (ch->ftl->cap & 1 << FTL_CAP_GET_BBTBL) {
-                if (nvm_ftl_cap_get_bbtbl(ppa, ch, arg)) goto OUT;
+                if (nvm_ftl_cap_get_bbtbl(ch, arg))
+                    goto OUT;
                 return 0;
             }
             break;
 
         case FTL_CAP_SET_BBTBL:
 
-            if (narg < 3 || nvm_memcheck(ch->ftl->ops->set_bbtbl))
+            set_bbtbl = (struct nvm_ftl_cap_set_bbtbl_st *) arg;
+            if (set_bbtbl->ppa.g.ch >= core.nvm_ch_count)
                 goto OUT;
-
+            ch = core.nvm_ch[set_bbtbl->ppa.g.ch];
             if (ch->ftl->cap & 1 << FTL_CAP_SET_BBTBL) {
-                if (nvm_ftl_cap_set_bbtbl(ppa, ch, arg)) goto OUT;
+                if (nvm_ftl_cap_set_bbtbl(ch, arg))
+                    goto OUT;
                 return 0;
             }
-
             break;
 
         case FTL_CAP_GET_L2PTBL:
         case FTL_CAP_SET_L2PTBL:
+        case FTL_CAP_INIT_FN:
+
+            gl_fn = (struct nvm_ftl_cap_gl_fn *) arg;
+            ftl = nvm_get_ftl_instance(gl_fn->ftl_id);
+            if (!ftl)
+                goto OUT;
+            if (ftl->cap & 1 << FTL_CAP_INIT_FN) {
+                if (nvm_ftl_cap_init_fn(ftl, gl_fn))
+                    goto OUT;
+                return 0;
+            }
+            break;
+
+        case FTL_CAP_EXIT_FN:
+
+            gl_fn = (struct nvm_ftl_cap_gl_fn *) arg;
+            ftl = nvm_get_ftl_instance(gl_fn->ftl_id);
+            if (!ftl)
+                goto OUT;
+            if (ftl->cap & 1 << FTL_CAP_EXIT_FN) {
+                if (nvm_ftl_cap_exit_fn(ftl, gl_fn))
+                    goto OUT;
+                return 0;
+            }
+            break;
+
         default:
             goto OUT;
     }
@@ -844,6 +1017,10 @@ int nvm_init (uint8_t start_all)
     ret = ftl_lnvm_init();
     if(ret) goto OUT;
 #endif
+#ifdef CONFIG_FTL_APPNVM
+    ret = ftl_appnvm_init();
+    if(ret) goto OUT;
+#endif
     core.run_flag |= RUN_FTL;
 
     /* create channels and global namespace */
@@ -884,6 +1061,18 @@ void nvm_clear_all (uint8_t stop_all)
         core.nvm_pcie->ops->exit();
         core.run_flag ^= RUN_PCIE;
     }
+
+#ifdef CONFIG_FTL_APPNVM
+    /* APPNVM Global Exit */
+    struct nvm_ftl_cap_gl_fn app_gl;
+    if (core.run_flag & RUN_APPNVM) {
+        app_gl.arg = NULL;
+        app_gl.ftl_id = FTL_ID_APPNVM;
+        app_gl.fn_id = 0;
+        nvm_ftl_cap_exec(FTL_CAP_EXIT_FN, &app_gl);
+        core.run_flag ^= RUN_APPNVM;
+    }
+#endif
 
     /* Clean channels */
     if ((core.run_flag & RUN_CH)) {

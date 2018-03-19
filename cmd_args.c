@@ -51,13 +51,35 @@ enum cmdtypes {
 static char doc_global[] = "\n*** OX Controller " OX_VER " - " LABEL " ***\n"
         " \n The DFC Open-Channel SSD Controller\n\n"
         " Available commands:\n"
-        "  start            Start controller with standard configuration\n"
+        "  start            Start controller as block device\n"
         "  debug            Start controller and print Admin/IO commands\n"
         "  null             Start controller with Null IOs (NVMe queue tests)\n"
         "  null-debug       Null IOs and print Admin/IO commands\n"
         "  test             Start controller, run tests and close\n"
         "  admin            Execute specific tasks within the controller\n"
         " \n Initial release developed by Ivan L. Picoli <ivpi@itu.dk>\n\n";
+
+static char doc_start[] =
+        "\nUse this command to start the controller.\n"
+        "\n Examples:"
+        "\n  Start controller as block device:"
+        "\n    ox-ctrl start"
+        "\n    ox-ctrl start -b\n"
+        "\n  Start controller as open-channel SSD:"
+        "\n    ox-ctrl start -o";
+
+static char doc_debug[] =
+        "\nUse this command to start the controller in debug mode.\n"
+        "\n Examples:"
+        "\n  Start controller as block device with global debug:"
+        "\n    ox-ctrl debug"
+        "\n    ox-ctrl debug -g\n"
+        "\n  Start controller as block device with FTL debug:"
+        "\n    ox-ctrl debug -f\n"
+        "\n  Start controller as block device with global and FTL debug:"
+        "\n    ox-ctrl debug -g -f\n"
+        "\n  Start controller as open-channel SSD with global debug:"
+        "\n    ox-ctrl debug -o";
 
 static char doc_test[] =
         "\nUse this command to run tests, it will start the controller,"
@@ -93,6 +115,85 @@ static struct argp_option opt_admin[] = {
     {"task", 't', "admin_task", 0, "Admin task to be executed. <char>"},
     {0}
 };
+
+static struct argp_option opt_start[] = {
+    {"block", 'b', "block", OPTION_ARG_OPTIONAL,"Start as block device."},
+    {"ocssd", 'o', "ocssd", OPTION_ARG_OPTIONAL, "Start as open-channel SSD."},
+    {0}
+};
+
+static struct argp_option opt_debug[] = {
+    {"global", 'g', "global", OPTION_ARG_OPTIONAL,"Global debug."},
+    {"ftl", 'f', "ftl", OPTION_ARG_OPTIONAL, "FTL debug."},
+    {"ocssd", 'o', "ocssd", OPTION_ARG_OPTIONAL, "Open-channel debug."},
+    {0}
+};
+
+static error_t parse_opt_start(int key, char *arg, struct argp_state *state)
+{
+    struct nvm_init_arg *args = state->input;
+
+    switch (key) {
+        case 'b':
+            args->arg_num++;
+            args->arg_flag |= CMDARG_FLAG_B;
+            break;
+        case 'o':
+            args->arg_num++;
+            args->arg_flag |= CMDARG_FLAG_O;
+            break;
+        case ARGP_KEY_END:
+            if (args->arg_num > 1)
+                argp_usage(state);
+            break;
+        case ARGP_KEY_ARG:
+        case ARGP_KEY_NO_ARGS:
+        case ARGP_KEY_ERROR:
+        case ARGP_KEY_SUCCESS:
+        case ARGP_KEY_FINI:
+        case ARGP_KEY_INIT:
+            break;
+        default:
+            return ARGP_ERR_UNKNOWN;
+    }
+
+    return 0;
+}
+
+static error_t parse_opt_debug(int key, char *arg, struct argp_state *state)
+{
+    struct nvm_init_arg *args = state->input;
+
+    switch (key) {
+        case 'g':
+            args->arg_num++;
+            args->arg_flag |= CMDARG_FLAG_G;
+            break;
+        case 'f':
+            args->arg_num++;
+            args->arg_flag |= CMDARG_FLAG_F;
+            break;
+        case 'o':
+            args->arg_num++;
+            args->arg_flag |= CMDARG_FLAG_O;
+            break;
+        case ARGP_KEY_END:
+            if (args->arg_num > 3)
+                argp_usage(state);
+            break;
+        case ARGP_KEY_ARG:
+        case ARGP_KEY_NO_ARGS:
+        case ARGP_KEY_ERROR:
+        case ARGP_KEY_SUCCESS:
+        case ARGP_KEY_FINI:
+        case ARGP_KEY_INIT:
+            break;
+        default:
+            return ARGP_ERR_UNKNOWN;
+    }
+
+    return 0;
+}
 
 static error_t parse_opt_test(int key, char *arg, struct argp_state *state)
 {
@@ -248,9 +349,24 @@ int cmdarg_init (int argc, char **argv)
     switch (core.args_global->cmdtype)
     {
         case CMDARG_START:
+            core.std_ftl = FTL_ID_APPNVM;
+            if (core.args_global->arg_flag & CMDARG_FLAG_O) {
+                core.lnvm = 1;
+                core.std_ftl = FTL_ID_LNVM;
+            }
             return OX_RUN_MODE;
         case CMDARG_DEBUG:
+            core.std_ftl = FTL_ID_APPNVM;
             core.debug |= 1 << 0;
+            if (core.args_global->arg_flag & CMDARG_FLAG_F)
+                core.ftl_debug = 1;
+            if (core.args_global->arg_flag & CMDARG_FLAG_O) {
+                core.lnvm = 1;
+                core.std_ftl = FTL_ID_LNVM;
+            }
+            if ((core.args_global->arg_flag & CMDARG_FLAG_F) &&
+                                !(core.args_global->arg_flag & CMDARG_FLAG_G))
+                core.debug ^= 1 << 0;
             return OX_RUN_MODE;
         case CMDARG_NULL:
             core.null |= 1 << 0;
