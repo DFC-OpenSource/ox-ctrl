@@ -104,9 +104,10 @@ static int dfcnand_get_next_prp(io_cmd *cmd){
             usleep(1);
             continue;
         }
+        prp_map |= 1 << (next - 1);
+
         pthread_mutex_unlock(&prpmap_mutex);
 
-        dfcnand_set_prp_map(next, 0x1);
         cmd->dfc_io.prp_index = next;
 
         return next - 1;

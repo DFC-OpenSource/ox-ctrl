@@ -57,9 +57,9 @@ static uint32_t volt_get_next_prp(struct volt_dma *dma, uint32_t ch){
             usleep(1);
             continue;
         }
-        pthread_mutex_unlock(&prpmap_mutex[ch]);
+        prp_map[ch] |= 1 << (next - 1);
 
-        volt_set_prp_map(next, ch, 0x1);
+        pthread_mutex_unlock(&prpmap_mutex[ch]);
 
         dma->prp_index = next;
 
