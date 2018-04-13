@@ -72,6 +72,8 @@ static void nvme_set_default (NvmeCtrl *n)
     n->mc = 0x2; /* Metadata Capabilities */
     n->meta = NVM_OOB_BITS;
     n->cmb = 0; /* Controller Memory Buffer */
+    n->cmbloc = 0;
+    n->cmbsz = 0;
     n->vid = PCI_VENDOR_ID_INTEL;
     n->did = PCI_DEVICE_ID_LS2085;
 
@@ -528,6 +530,13 @@ static void nvme_clear_ctrl (NvmeCtrl *n)
 {
     NvmeAsyncEvent *event;
     int i;
+
+    if (!n->running) {
+        /*nvme not in action.. so nothing to stop*/
+	return;
+    }
+
+    n->running = 0;
 
     if (n->sq)
         for (i = 0; i < n->num_queues; i++)
@@ -1072,7 +1081,7 @@ static void nvme_process_sq (NvmeSQ *sq)
     }
 
     uint16_t status;
-    uint64_t addr;
+    uint64_t addr = 0;
     NvmeCmd cmd;
     NvmeRequest *req;
     int processed = 0, reg_sqid = 0;
@@ -1086,6 +1095,9 @@ static void nvme_process_sq (NvmeSQ *sq)
 	} else {
             // TODO
         }
+
+        if (addr == 0) continue;
+
         nvme_addr_read (n, addr, (void *)&cmd, sizeof (NvmeCmd));
 	nvme_inc_sq_head (sq);
 
@@ -1273,13 +1285,15 @@ static void round_robin (NvmeCtrl *n)
 
 void nvme_q_scheduler (NvmeCtrl *n, uint32_t *fifo_count)
 {
-    if (n->qsched.WRR > 1 && n->qsched.n_active_iosqs > 0)
+    if (n->qsched.WRR > 1 && n->qsched.n_active_iosqs > 0) {
         log_err ("[nvme WARNING: suspicious value on n->qsched.WRR: %d\n",
                                                                 n->qsched.WRR);
+        return;
+    }
     if(n->qsched.WRR) {
 	weighted_round_robin(n, fifo_count);
     } else {
-	round_robin(n);
+        round_robin(n);
     }
 }
 
@@ -1341,7 +1355,7 @@ int nvme_init(NvmeCtrl *n)
         return ENVME_REGISTER;
 
     if(nvme_check_constraints(n) || nvme_init_namespaces(n) ||
-                                                    nvme_init_q_scheduler (n))
+                                                  nvme_init_q_scheduler (n))
         return ENVME_REGISTER;
 
     if (core.lnvm && lnvm_dev(n) && lnvm_init(n))
