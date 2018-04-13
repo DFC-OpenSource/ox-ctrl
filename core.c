@@ -97,29 +97,29 @@ int nvm_register_pcie_handler (struct nvm_pcie *pcie)
 
 static void nvm_calc_print_geo (struct nvm_mmgr_geometry *g)
 {
-    g->sec_per_pl_pg = g->sec_per_pg * g->n_of_planes;
-    g->sec_per_blk = g->sec_per_pl_pg * g->pg_per_blk;
-    g->sec_per_lun = g->sec_per_blk * g->blk_per_lun;
-    g->sec_per_ch = g->sec_per_lun * g->lun_per_ch;
-    g->pg_per_lun = g->pg_per_blk * g->blk_per_lun;
-    g->pg_per_ch = g->pg_per_lun * g->lun_per_ch;
-    g->blk_per_ch = g->blk_per_lun * g->lun_per_ch;
-    g->tot_sec = g->sec_per_ch * g->n_of_ch;
-    g->tot_pg = g->pg_per_ch * g->n_of_ch;
-    g->tot_blk = g->blk_per_ch * g->n_of_ch;
-    g->tot_lun = g->lun_per_ch * g->n_of_ch;
-    g->sec_size = g->pg_size / g->sec_per_pg;
-    g->pl_pg_size = g->pg_size * g->n_of_planes;
-    g->blk_size = g->pl_pg_size * g->pg_per_blk;
-    g->lun_size = g->blk_size * g->blk_per_lun;
-    g->ch_size = g->lun_size * g->lun_per_ch;
-    g->tot_size = g->ch_size * g->n_of_ch;
-    g->pg_oob_sz = g->sec_oob_sz * g->sec_per_pg;
-    g->pl_pg_oob_sz = g->pg_oob_sz * g->n_of_planes;
-    g->blk_oob_sz = g->pl_pg_oob_sz * g->pg_per_blk;
-    g->lun_oob_sz = g->blk_oob_sz * g->blk_per_lun;
-    g->ch_oob_sz = g->lun_oob_sz * g->lun_per_ch;
-    g->tot_oob_sz = g->ch_oob_sz * g->n_of_ch;
+    g->sec_per_pl_pg= (uint32_t) g->sec_per_pg *  (uint32_t) g->n_of_planes;
+    g->sec_per_blk  = g->sec_per_pl_pg * (uint32_t) g->pg_per_blk;
+    g->sec_per_lun  = g->sec_per_blk * (uint32_t) g->blk_per_lun;
+    g->sec_per_ch   = g->sec_per_lun * (uint32_t) g->lun_per_ch;
+    g->pg_per_lun   = (uint32_t) g->pg_per_blk * (uint32_t) g->blk_per_lun;
+    g->pg_per_ch    = g->pg_per_lun * (uint32_t) g->lun_per_ch;
+    g->blk_per_ch   = (uint32_t) g->blk_per_lun * (uint32_t) g->lun_per_ch;
+    g->tot_sec      = (uint64_t) g->sec_per_ch * (uint64_t) g->n_of_ch;
+    g->tot_pg       = (uint64_t) g->pg_per_ch * (uint64_t) g->n_of_ch;
+    g->tot_blk      = g->blk_per_ch * (uint32_t) g->n_of_ch;
+    g->tot_lun      = (uint32_t) g->lun_per_ch * (uint32_t) g->n_of_ch;
+    g->sec_size     = g->pg_size / (uint32_t) g->sec_per_pg;
+    g->pl_pg_size   = g->pg_size * (uint32_t) g->n_of_planes;
+    g->blk_size     = g->pl_pg_size * (uint32_t) g->pg_per_blk;
+    g->lun_size     = (uint64_t) g->blk_size * (uint64_t) g->blk_per_lun;
+    g->ch_size      = g->lun_size * (uint64_t) g->lun_per_ch;
+    g->tot_size     = g->ch_size * (uint64_t) g->n_of_ch;
+    g->pg_oob_sz    = g->sec_oob_sz * (uint32_t) g->sec_per_pg;
+    g->pl_pg_oob_sz = g->pg_oob_sz * (uint32_t) g->n_of_planes;
+    g->blk_oob_sz   = g->pl_pg_oob_sz * (uint32_t) g->pg_per_blk;
+    g->lun_oob_sz   = g->blk_oob_sz * (uint32_t) g->blk_per_lun;
+    g->ch_oob_sz    = (uint64_t) g->lun_oob_sz * (uint64_t) g->lun_per_ch;
+    g->tot_oob_sz   = g->ch_oob_sz * (uint64_t) g->n_of_ch;
 
     log_info ("   [n_of_planes   = %d]", g->n_of_planes);
     log_info ("   [n_of_channels = %d]", g->n_of_ch);
