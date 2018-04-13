@@ -133,5 +133,8 @@ int           ox_mq_complete_req (struct ox_mq *, struct ox_mq_entry *);
 void          ox_mq_show_mq (struct ox_mq *);
 void          ox_mq_show_all (void);
 struct ox_mq *ox_mq_get (const char *);
+int           ox_mq_used_count (struct ox_mq *, uint16_t qid);
+int           ox_mq_get_status (struct ox_mq *, struct ox_mq_stats *,
+                                                                  uint16_t qid);
 
 #endif /* OX_MQ_H */
