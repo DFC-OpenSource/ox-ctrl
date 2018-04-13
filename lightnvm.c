@@ -358,7 +358,6 @@ uint16_t lnvm_rw(NvmeCtrl *n, NvmeNamespace *ns, NvmeCmd *cmd, NvmeRequest *req)
         psl[0].ppa = spba;
     }
 
-    req->lightnvm_slba = lrw->slba;
     req->is_write = is_write;
 
     sppa = eppa = nvme_gen_to_dev_addr(ln, &psl[0]);

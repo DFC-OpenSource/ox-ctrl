@@ -171,6 +171,7 @@ struct nvm_io_cmd {
     uint32_t                    n_sec;
     uint64_t                    slba;
     uint8_t                     cmdtype;
+    pthread_mutex_t             mutex;
 };
 
 #include "nvme.h"
@@ -423,6 +424,10 @@ struct core_struct {
     jmp_buf                 jump;
     uint8_t                 run_flag;
     uint8_t                 debug;
+    uint8_t                 ftl_debug;
+    uint16_t                std_ftl;
+    uint8_t                 lnvm;
+    uint8_t                 volt;
     uint8_t                 null;
     struct nvm_pcie         *nvm_pcie;
     struct nvm_channel      **nvm_ch;

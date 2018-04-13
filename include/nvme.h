@@ -244,6 +244,20 @@ enum NvmeCmdDW0 {
     CMD_DW0_PSDT2   = (1 << 7)
 };
 
+enum NvmeCmdFuse {
+    CMD_FUSE_NO     = 0x0,
+    CMD_FUSE_1      = 0x1,
+    CMD_FUSE_2      = 0x2,
+    CMD_FUSE_RSV    = 0x3
+};
+
+enum NvmeCmdPsdt {
+    CMD_PSDT_PRP    = 0x0,
+    CMD_PSDT_SGL    = 0x1,
+    CMD_PSDT_SGL_MD = 0x2,
+    CMD_PSDT_RSV    = 0x3
+};
+
 #define NVME_CC_EN(cc)     ((cc >> CC_EN_SHIFT)     & CC_EN_MASK)
 #define NVME_CC_CSS(cc)    ((cc >> CC_CSS_SHIFT)    & CC_CSS_MASK)
 #define NVME_CC_MPS(cc)    ((cc >> CC_MPS_SHIFT)    & CC_MPS_MASK)
@@ -422,7 +436,9 @@ enum NvmeIoCommands {
 
 typedef struct NvmeCmd {
     uint8_t     opcode;
-    uint8_t     fuse;
+    uint8_t     fuse : 2;
+    uint8_t     rsvd : 4;
+    uint8_t     psdt : 2;
     uint16_t    cid;
     uint32_t    nsid;
     uint64_t    res1;
@@ -491,7 +507,9 @@ typedef struct NvmeCreateCq {
 
 typedef struct NvmeRwCmd {
     uint8_t     opcode;
-    uint8_t     flags;
+    uint8_t     fuse : 2;
+    uint8_t     rsvd : 4;
+    uint8_t     psdt : 2;
     uint16_t    cid;
     uint32_t    nsid;
     uint64_t    rsvd2;
@@ -837,11 +855,6 @@ typedef struct NvmeRequest {
     void                     *meta_buf;
     struct nvm_io_cmd        nvm_io;
     uint8_t                  lba_index;
-
-#if LIGHTNVM
-    uint64_t                 lightnvm_slba;
-    uint64_t                 *lightnvm_ppa_list;
-#endif /* LIGHTNVM */
 } NvmeRequest;
 
 typedef struct NvmeFeatureVal {
@@ -1028,9 +1041,7 @@ typedef struct NvmeCtrl {
     pthread_mutex_t                             req_mutex;
     LIST_HEAD(ext_list, NvmeRequest)            ext_list;/*req allocated later*/
 
-#if LIGHTNVM
     LnvmCtrl     lightnvm_ctrl;
-#endif /* LIGHTNVM */
 } NvmeCtrl;
 
 void     nvme_exit(void);
@@ -1072,7 +1083,6 @@ uint16_t nvme_compare(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
 uint16_t nvme_write_zeros(NvmeCtrl *,NvmeNamespace *,NvmeCmd *,NvmeRequest *);
 uint16_t nvme_rw (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
 
-#if LIGHTNVM
 /* LNVM functions */
 int     lnvm_init(NvmeCtrl *);
 uint8_t lnvm_dev(NvmeCtrl *);
@@ -1089,6 +1099,5 @@ uint16_t lnvm_set_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 /* LNVM IO cmd */
 uint16_t lnvm_erase_sync(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
 uint16_t lnvm_rw(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
-#endif /* LIGHTNVM */
 
 #endif /* NVME_H */
