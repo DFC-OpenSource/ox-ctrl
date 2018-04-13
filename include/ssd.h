@@ -69,6 +69,7 @@
 #define NVM_SYNCIO_FLAG_SYNC   0x2
 #define NVM_SYNCIO_FLAG_DEC    0x4
 
+#define NVM_ADMIN_START        0x2
 #define NVM_FULL_UPDOWN        0x1
 #define NVM_RESTART            0x0
 

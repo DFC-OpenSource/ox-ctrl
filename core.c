@@ -1023,6 +1023,9 @@ int nvm_init (uint8_t start_all)
 #endif
     core.run_flag |= RUN_FTL;
 
+    if (start_all == NVM_ADMIN_START)
+        goto START;
+
     /* create channels and global namespace */
     ret = nvm_ch_config();
     if(ret) goto OUT;
@@ -1040,6 +1043,7 @@ int nvm_init (uint8_t start_all)
     if(ret) goto OUT;
     core.run_flag |= RUN_NVME;
 
+START:
     core.nvm_nvme_ctrl->running = 0; /* ready */
     core.nvm_nvme_ctrl->stop = 0;
 
@@ -1265,6 +1269,8 @@ int nvm_init_ctrl (int argc, char **argv)
     log_info("[nvm: OX Controller is starting...]\n");
 
     ret = nvm_init(NVM_FULL_UPDOWN);
+    ret = (exec == OX_ADMIN_MODE) ?
+                        nvm_init (NVM_ADMIN_START) : nvm_init(NVM_FULL_UPDOWN);
     if(ret)
         goto CLEAN;
 
