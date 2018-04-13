@@ -304,6 +304,8 @@ static void cmd_prepare(struct argp_state *state, struct nvm_init_arg *args,
 
 static struct argp argp_test = {opt_test, parse_opt_test, 0, doc_test};
 static struct argp argp_admin = {opt_admin, parse_opt_admin, 0, doc_admin};
+static struct argp argp_start = {opt_start, parse_opt_start, 0, doc_start};
+static struct argp argp_debug = {opt_debug, parse_opt_debug, 0, doc_debug};
 
 error_t parse_opt (int key, char *arg, struct argp_state *state)
 {
@@ -312,15 +314,17 @@ error_t parse_opt (int key, char *arg, struct argp_state *state)
     switch(key)
     {
         case ARGP_KEY_ARG:
-            if (strcmp(arg, "start") == 0)
+            if (strcmp(arg, "start") == 0) {
                 args->cmdtype = CMDARG_START;
-            else if (strcmp(arg, "debug") == 0)
+                cmd_prepare(state, args, "start", &argp_start);
+            } else if (strcmp(arg, "debug") == 0) {
                 args->cmdtype = CMDARG_DEBUG;
-            else if (strcmp(arg, "null") == 0)
+                cmd_prepare(state, args, "debug", &argp_debug);
+            } else if (strcmp(arg, "null") == 0) {
                 args->cmdtype = CMDARG_NULL;
-            else if (strcmp(arg, "null-debug") == 0)
+            } else if (strcmp(arg, "null-debug") == 0) {
                 args->cmdtype = CMDARG_NULL_DEBUG;
-            else if (strcmp(arg, "test") == 0){
+            } else if (strcmp(arg, "test") == 0){
                 args->cmdtype = CMDARG_TEST;
                 cmd_prepare(state, args, "test", &argp_test);
             } else if (strcmp(arg, "admin") == 0){
