@@ -186,7 +186,7 @@ $(TESTS_DFC_PATH)/%-v.o : %.c include/tests.h
 
 
 ### TARGETS ###
-all: dfc dfc-tests dfc-volt
+all: print-gcc dfc dfc-tests dfc-volt
 
 dfc: $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC)
 	$(CC) $(CFLAGS) $(CORE) $(MMGRS_DFC) $(FTLS_DFC) $(PCIE_DFC) -o $(NAME) -lpthread -lreadline
@@ -199,3 +199,6 @@ dfc-volt: $(CORE_VOLT) $(MMGRS_VOLT) $(FTLS_VOLT) $(PCIE_VOLT) $(TESTS_VOLT)
 
 clean:
 	rm -f $(CLEAN) $(NAME) $(NAMET) $(NAMEV)
+
+print-gcc:
+	echo "GCC is located at "$(CC) > ~/gcc_location
