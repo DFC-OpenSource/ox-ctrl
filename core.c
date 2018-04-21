@@ -795,7 +795,7 @@ static void nvm_unregister_ftl (struct nvm_ftl *ftl)
     log_info(" [nvm: FTL (%s)(%d) unregistered.]\n", ftl->name, ftl->ftl_id);
 }
 
-static int nvm_ch_config ()
+static int nvm_ch_config (uint8_t init_ftl)
 {
     int i, c = 0, ret;
 
@@ -808,11 +808,14 @@ static int nvm_ch_config ()
     struct nvm_channel *ch;
     struct nvm_mmgr *mmgr;
     LIST_FOREACH(mmgr, &mmgr_head, entry){
+        printf ("n_of_ch %d\n", mmgr->geometry->n_of_ch);
         for (i = 0; i < mmgr->geometry->n_of_ch; i++){
             ch = core.nvm_ch[c] = &mmgr->ch_info[i];
             ch->ch_id       = c;
             ch->geometry    = mmgr->geometry;
             ch->mmgr        = mmgr;
+
+            printf ("i %d, in_use %d, ns_id %d, ns_part %d, ftl_id %d\n", i, ch->i.in_use, ch->i.ns_id, ch->i.ns_part, ch->i.ftl_id);
 
             /* For now we set all channels to be managed by the standard FTL */
             /* For now all channels are set to the same namespace */
@@ -831,9 +834,11 @@ static int nvm_ch_config ()
             if(!ch->ftl || !ch->mmgr || ch->geometry->pg_size != NVM_PG_SIZE)
                 return ECH_CONFIG;
 
-            /* ftl must set available number of pages */
-            ret = ch->ftl->ops->init_ch(ch);
-                if (ret) return ret;
+            if (init_ftl) {
+                /* ftl must set available number of pages */
+                ret = ch->ftl->ops->init_ch(ch);
+                    if (ret) return ret;
+            }
 
             ch->tot_bytes = ch->ns_pgs *
                                   (ch->geometry->pg_size & 0xffffffffffffffff);
@@ -1023,11 +1028,8 @@ int nvm_init (uint8_t start_all)
 #endif
     core.run_flag |= RUN_FTL;
 
-    if (start_all == NVM_ADMIN_START)
-        goto START;
-
     /* create channels and global namespace */
-    ret = nvm_ch_config();
+    ret = (start_all == NVM_ADMIN_START) ? nvm_ch_config(0) : nvm_ch_config(1);
     if(ret) goto OUT;
     core.run_flag |= RUN_CH;
 
@@ -1043,7 +1045,6 @@ int nvm_init (uint8_t start_all)
     if(ret) goto OUT;
     core.run_flag |= RUN_NVME;
 
-START:
     core.nvm_nvme_ctrl->running = 0; /* ready */
     core.nvm_nvme_ctrl->stop = 0;
 
@@ -1261,6 +1262,11 @@ int nvm_init_ctrl (int argc, char **argv)
     if (exec < 0)
         goto OUT;
 
+    core.ftl_debug = 0;
+    core.std_ftl = FTL_ID_APPNVM;
+    core.lnvm = 0;
+    core.volt = 0;
+
     openlog("NVME",LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL0);
     LIST_INIT(&mmgr_head);
     LIST_INIT(&ftl_head);
@@ -1268,13 +1274,13 @@ int nvm_init_ctrl (int argc, char **argv)
     printf("OX Controller %s - %s\n Starting...\n", OX_VER, LABEL);
     log_info("[nvm: OX Controller is starting...]\n");
 
-    ret = nvm_init(NVM_FULL_UPDOWN);
     ret = (exec == OX_ADMIN_MODE) ?
                         nvm_init (NVM_ADMIN_START) : nvm_init(NVM_FULL_UPDOWN);
     if(ret)
         goto CLEAN;
 
-    nvm_print_log();
+    if (exec != OX_ADMIN_MODE)
+        nvm_print_log();
 
     switch (exec) {
         case OX_TEST_MODE:

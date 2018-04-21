@@ -152,7 +152,7 @@ static int ppa_io_check_pg (struct nvm_io_cmd *cmd, uint8_t index)
     mio->sec_sz = cmd->sec_sz;
     mio->md_sz = LNVM_SEC_OOBSZ * LNVM_SEC_PG;
 
-    memset (&mio->prp, 0x0, sizeof(uint64_t) * LNVM_SEC_PG);
+    memset (mio->prp, 0x0, sizeof(uint64_t) * LNVM_SEC_PG);
 
     for (c = 0; c < mio->n_sectors; c++)
         mio->prp[cmd->ppalist[mio->sec_offset + c].g.sec] =

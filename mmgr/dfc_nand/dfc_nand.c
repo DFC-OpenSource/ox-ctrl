@@ -402,7 +402,7 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
 {
     int c;
     uint64_t prp_sec;
-    uint32_t prp_map;
+    uint32_t prp_map, prp_map_oob;
     uint32_t sec_sz = NAND_SECTOR_SIZE;
     uint32_t pg_sz  = NAND_PAGE_SIZE;
     uint32_t oob_sz = NAND_OOB_SIZE;
@@ -454,6 +454,18 @@ static int dfcnand_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
         cmd->host_addr[c] = (cmd_nvm->sync_count||(core.run_flag & RUN_TESTS)) ?
             (uint64_t) phy_addr[prp_map] + sec_sz * c :
             (uint64_t) core.nvm_pcie->host_io_mem->paddr + prp_sec;
+
+        /* ISSUE: The FPGA might not support DMA from host and SoC in the same
+         * command, we keep it disabled for now */
+        /* Use a physical address to transfer enforced synchronous metadata */
+        /*
+        if (cmd_nvm->force_sync_md && (c == 4)) {
+            prp_map_oob = dfcnand_get_next_prp(cmd);
+            memcpy (virt_addr[prp_map_oob],
+                                (uint64_t *) cmd_nvm->md_prp, cmd_nvm->md_sz);
+            cmd->host_addr[c] = (uint64_t) phy_addr[prp_map_oob];
+        }
+        */
 
         if ((core.run_flag & RUN_TESTS))
             continue;
@@ -739,6 +751,13 @@ OUT:
     if (cmd->dfc_io.local_dma && (cmd->dfc_io.cmd_type == MMGR_WRITE_PG ||
                                          cmd->dfc_io.cmd_type == MMGR_READ_PG))
         dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
+
+    /* Enforce synchronous metadata on writes */
+    /* ISSUE: The FPGA might not support, disabled for now */
+    /*
+    if (nvm_cmd->force_sync_md && (cmd->dfc_io.cmd_type == MMGR_WRITE_PG))
+        dfcnand_set_prp_map(cmd->dfc_io.prp_index, 0x0);
+    */
 
     nvm_callback(nvm_cmd);
 

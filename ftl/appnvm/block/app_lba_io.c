@@ -321,8 +321,15 @@ static void lba_io_prepare_cmd (struct lba_io_cmd *lcmd, uint8_t type)
             cmd->mmgr_io[pg].sec_offset = i - nsec;
             cmd->mmgr_io[pg].sync_count = NULL;
             cmd->mmgr_io[pg].sync_mutex = NULL;
-            cmd->mmgr_io[pg].force_sync_md = 1;
-            cmd->md_prp[pg] = (!type) ? moff : 0;
+
+            /* ISSUE: The FTL needs to add metadata on each page to keep track
+             of the user pages. However, the FPGA might not support DMA from
+             host and SoC in the same command. For now, metadata is disabled
+             until a proper write-caching is developed. */
+            //cmd->mmgr_io[pg].force_sync_md = 1;
+            //cmd->md_prp[pg] = (!type) ? moff : 0;
+            cmd->mmgr_io[pg].force_sync_md = 0;
+            cmd->md_prp[pg] = 0;
 
             pg++;
             nsec = 0;
