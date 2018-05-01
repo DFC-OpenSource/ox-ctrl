@@ -51,12 +51,14 @@ enum cmdtypes {
 static char doc_global[] = "\n*** OX Controller " OX_VER " - " LABEL " ***\n"
         " \n The DFC Open-Channel SSD Controller\n\n"
         " Available commands:\n"
-        "  start            Start controller as block device\n"
+        "  start            Start controller as a block device\n"
+        "  start -o         Start controller as open-channel\n"
         "  debug            Start controller and print Admin/IO commands\n"
         "  null             Start controller with Null IOs (NVMe queue tests)\n"
         "  null-debug       Null IOs and print Admin/IO commands\n"
         "  test             Start controller, run tests and close\n"
         "  admin            Execute specific tasks within the controller\n"
+        " \n Use <command> --help for details.\n"
         " \n Initial release developed by Ivan L. Picoli <ivpi@itu.dk>\n\n";
 
 static char doc_start[] =
@@ -128,72 +130,6 @@ static struct argp_option opt_debug[] = {
     {"ocssd", 'o', "ocssd", OPTION_ARG_OPTIONAL, "Open-channel debug."},
     {0}
 };
-
-static error_t parse_opt_start(int key, char *arg, struct argp_state *state)
-{
-    struct nvm_init_arg *args = state->input;
-
-    switch (key) {
-        case 'b':
-            args->arg_num++;
-            args->arg_flag |= CMDARG_FLAG_B;
-            break;
-        case 'o':
-            args->arg_num++;
-            args->arg_flag |= CMDARG_FLAG_O;
-            break;
-        case ARGP_KEY_END:
-            if (args->arg_num > 1)
-                argp_usage(state);
-            break;
-        case ARGP_KEY_ARG:
-        case ARGP_KEY_NO_ARGS:
-        case ARGP_KEY_ERROR:
-        case ARGP_KEY_SUCCESS:
-        case ARGP_KEY_FINI:
-        case ARGP_KEY_INIT:
-            break;
-        default:
-            return ARGP_ERR_UNKNOWN;
-    }
-
-    return 0;
-}
-
-static error_t parse_opt_debug(int key, char *arg, struct argp_state *state)
-{
-    struct nvm_init_arg *args = state->input;
-
-    switch (key) {
-        case 'g':
-            args->arg_num++;
-            args->arg_flag |= CMDARG_FLAG_G;
-            break;
-        case 'f':
-            args->arg_num++;
-            args->arg_flag |= CMDARG_FLAG_F;
-            break;
-        case 'o':
-            args->arg_num++;
-            args->arg_flag |= CMDARG_FLAG_O;
-            break;
-        case ARGP_KEY_END:
-            if (args->arg_num > 3)
-                argp_usage(state);
-            break;
-        case ARGP_KEY_ARG:
-        case ARGP_KEY_NO_ARGS:
-        case ARGP_KEY_ERROR:
-        case ARGP_KEY_SUCCESS:
-        case ARGP_KEY_FINI:
-        case ARGP_KEY_INIT:
-            break;
-        default:
-            return ARGP_ERR_UNKNOWN;
-    }
-
-    return 0;
-}
 
 static error_t parse_opt_test(int key, char *arg, struct argp_state *state)
 {
@@ -304,8 +240,6 @@ static void cmd_prepare(struct argp_state *state, struct nvm_init_arg *args,
 
 static struct argp argp_test = {opt_test, parse_opt_test, 0, doc_test};
 static struct argp argp_admin = {opt_admin, parse_opt_admin, 0, doc_admin};
-static struct argp argp_start = {opt_start, parse_opt_start, 0, doc_start};
-static struct argp argp_debug = {opt_debug, parse_opt_debug, 0, doc_debug};
 
 error_t parse_opt (int key, char *arg, struct argp_state *state)
 {
@@ -314,17 +248,15 @@ error_t parse_opt (int key, char *arg, struct argp_state *state)
     switch(key)
     {
         case ARGP_KEY_ARG:
-            if (strcmp(arg, "start") == 0) {
+            if (strcmp(arg, "start") == 0)
                 args->cmdtype = CMDARG_START;
-                cmd_prepare(state, args, "start", &argp_start);
-            } else if (strcmp(arg, "debug") == 0) {
+            else if (strcmp(arg, "debug") == 0)
                 args->cmdtype = CMDARG_DEBUG;
-                cmd_prepare(state, args, "debug", &argp_debug);
-            } else if (strcmp(arg, "null") == 0) {
+            else if (strcmp(arg, "null") == 0)
                 args->cmdtype = CMDARG_NULL;
-            } else if (strcmp(arg, "null-debug") == 0) {
+            else if (strcmp(arg, "null-debug") == 0)
                 args->cmdtype = CMDARG_NULL_DEBUG;
-            } else if (strcmp(arg, "test") == 0){
+            else if (strcmp(arg, "test") == 0){
                 args->cmdtype = CMDARG_TEST;
                 cmd_prepare(state, args, "test", &argp_test);
             } else if (strcmp(arg, "admin") == 0){
@@ -353,24 +285,9 @@ int cmdarg_init (int argc, char **argv)
     switch (core.args_global->cmdtype)
     {
         case CMDARG_START:
-            core.std_ftl = FTL_ID_APPNVM;
-            if (core.args_global->arg_flag & CMDARG_FLAG_O) {
-                core.lnvm = 1;
-                core.std_ftl = FTL_ID_LNVM;
-            }
             return OX_RUN_MODE;
         case CMDARG_DEBUG:
-            core.std_ftl = FTL_ID_APPNVM;
             core.debug |= 1 << 0;
-            if (core.args_global->arg_flag & CMDARG_FLAG_F)
-                core.ftl_debug = 1;
-            if (core.args_global->arg_flag & CMDARG_FLAG_O) {
-                core.lnvm = 1;
-                core.std_ftl = FTL_ID_LNVM;
-            }
-            if ((core.args_global->arg_flag & CMDARG_FLAG_F) &&
-                                !(core.args_global->arg_flag & CMDARG_FLAG_G))
-                core.debug ^= 1 << 0;
             return OX_RUN_MODE;
         case CMDARG_NULL:
             core.null |= 1 << 0;
