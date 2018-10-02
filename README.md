@@ -2,7 +2,9 @@
 
 ```
 COMING SOON...
-OX 2.0 is coming with a new full-fledged FTL and Near-Data Processing support!
+OX 2.0 is coming with a new full-fledged FTL and Near-Data Processing (NDP) support!
+A very first version of OX 2.0 + OX-Block FTL is located at 'for-next' branch, but not released.
+Version 2.1 is to support NVMe over Fabrics and a better NDP library. The code is under devolopment.
 
 RELEASE
 OX 1.4.0 is released. The main feature is supporting pblk target (host FTL) by enabling 
