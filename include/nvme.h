@@ -1,33 +1,23 @@
 /* OX: Open-Channel NVM Express SSD Controller
+ * 
+ *  - NVM Express Specification (header)
  *
- *  - NVMe Express Standard
+ * Copyright 2016 IT University of Copenhagen
+ * 
+ * Modified by Ivan Luiz Picoli <ivpi@itu.dk>
+ * This file has been modified from the QEMU project NVMe device.
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * Copyright (C) 2016, IT University of Copenhagen. All rights reserved.
- * Written by Ivan Luiz Picoli <ivpi@itu.dk>
- * This file has been modified from the QEMU project.
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
- * Funding support provided by CAPES Foundation, Ministry of Education
- * of Brazil, Brasilia - DF 70040-020, Brazil.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *  - Redistributions of source code must retain the above copyright notice,
- *  this list of conditions and the following disclaimer.
- *  - Redistributions in binary form must reproduce the above copyright notice,
- *  this list of conditions and the following disclaimer in the documentation
- *  and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE FOR ANY
- * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #ifndef NVME_H
@@ -38,14 +28,16 @@
 #include <pthread.h>
 #include <sys/queue.h>
 #include <stdlib.h>
-#include "lightnvm.h"
-#include "ssd.h"
+#include <libox.h>
+#include <ox-lightnvm.h>
 
 #define PCI_VENDOR_ID_INTEL     0x8086
 #define PCI_VENDOR_ID_LNVM      0x1d1d
+#define PCI_VENDOR_ID_OX        0x4c4c
 
 #define PCI_DEVICE_ID_LS2085    0x5845
 #define PCI_DEVICE_ID_LNVM      0x1f1f
+#define PCI_DEVICE_ID_OX        0x3c3c
 
 #define NVME_MAX_QS             2047 //PCI_MSIX_FLAGS_QSIZE -TODO
 #define NVME_MAX_QUEUE_ENTRIES  0xffff
@@ -63,7 +55,6 @@
 #define NVME_NUM_QUEUES     64
 #define NVME_MQ_MSGSIZE     8 /*Messages are integers indicating SQIDs*/
 #define NVME_MQ_MAXMSG      NVME_NUM_QUEUES
-#define NVME_MQ_NAME        "/nvme_mq"
 #define SHADOW_REG_SZ       64
 #define NVME_MAX_PRIORITY   4
 
@@ -114,7 +105,9 @@ enum NvmeStatusCodes {
     NVME_E2E_REF_ERROR          = 0x0284,
     NVME_CMP_FAILURE            = 0x0285,
     NVME_ACCESS_DENIED          = 0x0286,
-    NVME_MEDIA_TIMEOUT          = 0x0287,
+    NVME_HOST_TIMEOUT           = 0x0287,
+    NVME_MEDIA_TIMEOUT          = 0x0288,
+    NVME_NOT_SUBMITTED          = 0x0289,
     NVME_MORE                   = 0x2000,
     NVME_DNR                    = 0x4000,
     NVME_NO_COMPLETE            = 0xffff,
@@ -244,6 +237,34 @@ enum NvmeCmdDW0 {
     CMD_DW0_PSDT2   = (1 << 7)
 };
 
+enum NvmeCmdFuse {
+    CMD_FUSE_NO     = 0x0,
+    CMD_FUSE_1      = 0x1,
+    CMD_FUSE_2      = 0x2,
+    CMD_FUSE_RSV    = 0x3
+};
+
+enum NvmeCmdPsdt {
+    CMD_PSDT_PRP    = 0x0,
+    CMD_PSDT_SGL    = 0x1,
+    CMD_PSDT_SGL_MD = 0x2,
+    CMD_PSDT_RSV    = 0x3
+};
+
+enum NvmeSGLTypes {
+    NVME_SGL_DATA_BLOCK    = 0x0,
+    NVME_SGL_BIT_BUCKET    = 0x1,
+    NVME_SGL_SEGMENT       = 0x2,
+    NVME_SGL_LAST_SEGMENT  = 0x3,
+    NVME_SGL_KEYED_DATA    = 0x4,
+    NVME_SGL_5BYTE_KEYS    = 0x5
+};
+
+enum NvmeSGLSubtypes {
+    NVME_SGL_SUB_ADDR      = 0x0,
+    NVME_SGL_SUB_OFFSET    = 0x1
+};
+
 #define NVME_CC_EN(cc)     ((cc >> CC_EN_SHIFT)     & CC_EN_MASK)
 #define NVME_CC_CSS(cc)    ((cc >> CC_CSS_SHIFT)    & CC_CSS_MASK)
 #define NVME_CC_MPS(cc)    ((cc >> CC_MPS_SHIFT)    & CC_MPS_MASK)
@@ -359,6 +380,68 @@ enum NvmeAqaMask {
 #define NVME_CQ_FLAGS_PC(cq_flags)  (cq_flags & 0x1)
 #define NVME_CQ_FLAGS_IEN(cq_flags) ((cq_flags >> 1) & 0x1)
 
+enum NvmeCmblocShift {
+    CMBLOC_BIR_SHIFT  = 0,
+    CMBLOC_OFST_SHIFT = 12,
+};
+
+enum NvmeCmblocMask {
+    CMBLOC_BIR_MASK  = 0x7,
+    CMBLOC_OFST_MASK = 0xfffff,
+};
+
+#define NVME_CMBLOC_BIR(cmbloc) ((cmbloc >> CMBLOC_BIR_SHIFT)  & CMBLOC_BIR_MASK)
+#define NVME_CMBLOC_OFST(cmbloc)((cmbloc >> CMBLOC_OFST_SHIFT) & CMBLOC_OFST_MASK)
+
+#define NVME_CMBLOC_SET_BIR(cmbloc, val)   (cmbloc |= (uint64_t)(val & CMBLOC_BIR_MASK)  \
+                                                                   << CMBLOC_BIR_SHIFT)
+#define NVME_CMBLOC_SET_OFST(cmbloc, val)  (cmbloc |= (uint64_t)(val & CMBLOC_OFST_MASK)  \
+                                                                   << CMBLOC_OFST_SHIFT)
+enum NvmeCmbszShift {
+    CMBSZ_SQS_SHIFT   = 0,
+    CMBSZ_CQS_SHIFT   = 1,
+    CMBSZ_LISTS_SHIFT = 2,
+    CMBSZ_RDS_SHIFT   = 3,
+    CMBSZ_WDS_SHIFT   = 4,
+    CMBSZ_SZU_SHIFT   = 8,
+    CMBSZ_SZ_SHIFT    = 12,
+};
+
+enum NvmeCmbszMask {
+    CMBSZ_SQS_MASK   = 0x1,
+    CMBSZ_CQS_MASK   = 0x1,
+    CMBSZ_LISTS_MASK = 0x1,
+    CMBSZ_RDS_MASK   = 0x1,
+    CMBSZ_WDS_MASK   = 0x1,
+    CMBSZ_SZU_MASK   = 0xf,
+    CMBSZ_SZ_MASK    = 0xfffff,
+};
+
+#define NVME_CMBSZ_SQS(cmbsz)  ((cmbsz >> CMBSZ_SQS_SHIFT)   & CMBSZ_SQS_MASK)
+#define NVME_CMBSZ_CQS(cmbsz)  ((cmbsz >> CMBSZ_CQS_SHIFT)   & CMBSZ_CQS_MASK)
+#define NVME_CMBSZ_LISTS(cmbsz)((cmbsz >> CMBSZ_LISTS_SHIFT) & CMBSZ_LISTS_MASK)
+#define NVME_CMBSZ_RDS(cmbsz)  ((cmbsz >> CMBSZ_RDS_SHIFT)   & CMBSZ_RDS_MASK)
+#define NVME_CMBSZ_WDS(cmbsz)  ((cmbsz >> CMBSZ_WDS_SHIFT)   & CMBSZ_WDS_MASK)
+#define NVME_CMBSZ_SZU(cmbsz)  ((cmbsz >> CMBSZ_SZU_SHIFT)   & CMBSZ_SZU_MASK)
+#define NVME_CMBSZ_SZ(cmbsz)   ((cmbsz >> CMBSZ_SZ_SHIFT)    & CMBSZ_SZ_MASK)
+
+#define NVME_CMBSZ_SET_SQS(cmbsz, val)   (cmbsz |= (uint64_t)(val & CMBSZ_SQS_MASK)  \
+                                                                << CMBSZ_SQS_SHIFT)
+#define NVME_CMBSZ_SET_CQS(cmbsz, val)   (cmbsz |= (uint64_t)(val & CMBSZ_CQS_MASK)  \
+                                                                 << CMBSZ_CQS_SHIFT)
+#define NVME_CMBSZ_SET_LISTS(cmbsz, val) (cmbsz |= (uint64_t)(val & CMBSZ_LISTS_MASK)  \
+                                                                << CMBSZ_LISTS_SHIFT)
+#define NVME_CMBSZ_SET_RDS(cmbsz, val)   (cmbsz |= (uint64_t)(val & CMBSZ_RDS_MASK)  \
+                                                                << CMBSZ_RDS_SHIFT)
+#define NVME_CMBSZ_SET_WDS(cmbsz, val)   (cmbsz |= (uint64_t)(val & CMBSZ_WDS_MASK)  \
+                                                                << CMBSZ_WDS_SHIFT)
+#define NVME_CMBSZ_SET_SZU(cmbsz, val)   (cmbsz |= (uint64_t)(val & CMBSZ_SZU_MASK)  \
+                                                                << CMBSZ_SZU_SHIFT)
+#define NVME_CMBSZ_SET_SZ(cmbsz, val)    (cmbsz |= (uint64_t)(val & CMBSZ_SZ_MASK)  \
+                                                                << CMBSZ_SZ_SHIFT)
+
+#define NVME_CMBSZ_GETSIZE(cmbsz) (NVME_CMBSZ_SZ(cmbsz) * (1<<(12+4*NVME_CMBSZ_SZU(cmbsz))))
+
 enum NvmeSmartWarn {
     NVME_SMART_SPARE                  = 1 << 0,
     NVME_SMART_TEMPERATURE            = 1 << 1,
@@ -380,6 +463,7 @@ enum NvmeAdminCommands {
     NVME_ADM_CMD_ASYNC_EV_REQ   = 0x0c,
     NVME_ADM_CMD_ACTIVATE_FW    = 0x10,
     NVME_ADM_CMD_DOWNLOAD_FW    = 0x11,
+    NVME_ADM_CMD_FABRICS        = 0x7f,
     NVME_ADM_CMD_FORMAT_NVM     = 0x80,
     NVME_ADM_CMD_SECURITY_SEND  = 0x81,
     NVME_ADM_CMD_SECURITY_RECV  = 0x82,
@@ -418,24 +502,64 @@ enum NvmeIoCommands {
     NVME_CMD_COMPARE            = 0x05,
     NVME_CMD_WRITE_ZEROS        = 0x08,
     NVME_CMD_DSM                = 0x09,
+
+    /* For testing purposes */
+    NVME_CMD_WRITE_NULL         = 0xfd,
+    NVME_CMD_READ_NULL          = 0xfe
 };
+
+enum NvmeEleosCommands {
+    NVME_CMD_ELEOS_FLUSH        = 0xa1,
+    NVME_CMD_ELEOS_READ         = 0xa3
+};
+
+typedef struct NvmeSGLDesc {
+    union {
+        struct {
+            uint64_t    addr;
+            uint32_t    length;
+            uint8_t     rsvd[3];
+        }  __attribute__((packed)) data;
+        struct {
+            uint64_t    addr;
+            uint8_t     length[3];
+            uint32_t    key;
+        }  __attribute__((packed)) keyed;
+        struct {
+            uint64_t    addr;
+            uint16_t    length;
+            uint8_t     key[5];
+        }  __attribute__((packed)) keyed5;
+        /* Add other types */
+        uint8_t     specific[15];
+    };
+    uint8_t     subtype : 4;
+    uint8_t     type    : 4;
+} __attribute__((packed)) NvmeSGLDesc;
 
 typedef struct NvmeCmd {
     uint8_t     opcode;
-    uint8_t     fuse;
+    uint8_t     fuse : 2;
+    uint8_t     rsvd : 4;
+    uint8_t     psdt : 2;
     uint16_t    cid;
     uint32_t    nsid;
     uint64_t    res1;
     uint64_t    mptr;
-    uint64_t    prp1;
-    uint64_t    prp2;
+    union {
+        NvmeSGLDesc     sgl;
+        struct {
+            uint64_t    prp1;
+            uint64_t    prp2;
+        };
+    };
     uint32_t    cdw10;
     uint32_t    cdw11;
     uint32_t    cdw12;
     uint32_t    cdw13;
     uint32_t    cdw14;
     uint32_t    cdw15;
-} NvmeCmd;
+} __attribute__((packed)) NvmeCmd;
 
 typedef struct NvmeIdentify {
     uint8_t     opcode;
@@ -491,7 +615,9 @@ typedef struct NvmeCreateCq {
 
 typedef struct NvmeRwCmd {
     uint8_t     opcode;
-    uint8_t     flags;
+    uint8_t     fuse : 2;
+    uint8_t     rsvd : 4;
+    uint8_t     psdt : 2;
     uint16_t    cid;
     uint32_t    nsid;
     uint64_t    rsvd2;
@@ -505,7 +631,7 @@ typedef struct NvmeRwCmd {
     uint32_t    reftag;
     uint16_t    apptag;
     uint16_t    appmask;
-} NvmeRwCmd;
+} __attribute__((packed)) NvmeRwCmd;
 
 typedef struct vs_reg {
     uint8_t rsvd;
@@ -709,7 +835,7 @@ typedef struct NvmeCqe {
             uint32_t    rsvd;
         } n;
         uint64_t    res64;
-    };
+    } u;
     uint16_t    sq_head;
     uint16_t    sq_id;
     uint16_t    cid;
@@ -819,6 +945,7 @@ typedef struct NvmeNamespace {
     uint64_t        meta_start_offset;
 } NvmeNamespace;
 
+struct nvm_io_cmd;
 typedef struct NvmeRequest {
     uint8_t                  ext; /* allocated later due timeout request */
     TAILQ_ENTRY(NvmeRequest) entry;
@@ -837,11 +964,8 @@ typedef struct NvmeRequest {
     void                     *meta_buf;
     struct nvm_io_cmd        nvm_io;
     uint8_t                  lba_index;
-
-#if LIGHTNVM
-    uint64_t                 lightnvm_slba;
-    uint64_t                 *lightnvm_ppa_list;
-#endif /* LIGHTNVM */
+    void                     *ctx;
+    void                     *mq_req;
 } NvmeRequest;
 
 typedef struct NvmeFeatureVal {
@@ -958,6 +1082,7 @@ typedef struct NvmeStats {
     uint64_t    num_active_queues;
 } NvmeStats;
 
+struct nvm_memory_region;
 typedef struct NvmeCtrl {
     struct nvm_memory_region   iomem;
     struct nvm_memory_region   ctrl_mem;
@@ -1028,67 +1153,71 @@ typedef struct NvmeCtrl {
     pthread_mutex_t                             req_mutex;
     LIST_HEAD(ext_list, NvmeRequest)            ext_list;/*req allocated later*/
 
-#if LIGHTNVM
     LnvmCtrl     lightnvm_ctrl;
-#endif /* LIGHTNVM */
 } NvmeCtrl;
 
-void     nvme_exit(void);
-uint8_t  nvme_write_to_host(void *, uint64_t, ssize_t);
-uint8_t  nvme_read_from_host(void *, uint64_t, ssize_t);
+/* NVMe over PCI functions */
+
+void nvme_exit(void);
+uint8_t nvme_write_to_host(void *, uint64_t, ssize_t);
+uint8_t nvme_read_from_host(void *, uint64_t, ssize_t);
 uint16_t nvme_init_cq (NvmeCQ *, NvmeCtrl *, uint64_t, uint16_t, uint16_t,
         uint16_t, uint16_t, int);
 uint16_t nvme_init_sq (NvmeSQ *, NvmeCtrl *, uint64_t, uint16_t, uint16_t,
         uint16_t, enum NvmeQFlags, int);
-void     nvme_enqueue_req_completion (NvmeCQ *, NvmeRequest *);
-void     nvme_post_cqes (void *);
-int      nvme_check_cqid (NvmeCtrl *, uint16_t);
-int      nvme_check_sqid (NvmeCtrl *, uint16_t);
-void     nvme_free_sq (NvmeSQ *, NvmeCtrl *);
-void     nvme_free_cq (NvmeCQ *, NvmeCtrl *);
-void     nvme_addr_read (NvmeCtrl *, uint64_t, void *, int);
-void     nvme_addr_write (NvmeCtrl *, uint64_t, void *, int);
-void     nvme_enqueue_event (NvmeCtrl *, uint8_t, uint8_t, uint8_t);
-void     nvme_rw_cb (void *);
+void nvme_enqueue_req_completion (NvmeCQ *, NvmeRequest *);
+void nvme_post_cqes (void *);
+int nvme_check_cqid (NvmeCtrl *, uint16_t);
+int nvme_check_sqid (NvmeCtrl *, uint16_t);
+void nvme_free_sq (NvmeSQ *, NvmeCtrl *);
+void nvme_free_cq (NvmeCQ *, NvmeCtrl *);
+void nvme_addr_read (NvmeCtrl *, uint64_t, void *, int);
+void nvme_addr_write (NvmeCtrl *, uint64_t, void *, int);
+void nvme_enqueue_event (NvmeCtrl *, uint8_t, uint8_t, uint8_t);
+void nvme_rw_cb (void *);
+void nvme_process_db (NvmeCtrl *n, uint64_t addr, uint64_t val);
+void nvme_process_reg (NvmeCtrl *n, uint64_t offset, uint64_t data);
 
 /* NVMe Admin cmd */
-uint16_t nvme_identify (NvmeCtrl *, NvmeCmd *);
-uint16_t nvme_del_sq (NvmeCtrl *, NvmeCmd *);
-uint16_t nvme_create_sq (NvmeCtrl *, NvmeCmd *);
-uint16_t nvme_del_cq (NvmeCtrl *, NvmeCmd *);
-uint16_t nvme_create_cq (NvmeCtrl *, NvmeCmd *);
-uint16_t nvme_set_feature (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
-uint16_t nvme_get_feature (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
-uint16_t nvme_get_log(NvmeCtrl *, NvmeCmd *);
-uint16_t nvme_async_req (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
-uint16_t nvme_format (NvmeCtrl *, NvmeCmd *);
-uint16_t nvme_abort_req (NvmeCtrl *, NvmeCmd *, uint32_t *);
+//uint16_t nvme_identify (NvmeCtrl *, NvmeCmd *);
+//uint16_t nvme_del_sq (NvmeCtrl *, NvmeCmd *);
+//uint16_t nvme_create_sq (NvmeCtrl *, NvmeCmd *);
+//uint16_t nvme_del_cq (NvmeCtrl *, NvmeCmd *);
+//uint16_t nvme_create_cq (NvmeCtrl *, NvmeCmd *);
+//uint16_t nvme_set_feature (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_get_feature (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_get_log(NvmeCtrl *, NvmeCmd *);
+//uint16_t nvme_async_req (NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_format (NvmeCtrl *, NvmeCmd *);
+//uint16_t nvme_abort_req (NvmeCtrl *, NvmeCmd *, uint32_t *);
 
 /* NVMe IO cmd */
-uint16_t nvme_write_uncor(NvmeCtrl *,NvmeNamespace *,NvmeCmd *,NvmeRequest *);
-uint16_t nvme_dsm (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
-uint16_t nvme_flush(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
-uint16_t nvme_compare(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
-uint16_t nvme_write_zeros(NvmeCtrl *,NvmeNamespace *,NvmeCmd *,NvmeRequest *);
-uint16_t nvme_rw (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_write_uncor(NvmeCtrl *,NvmeNamespace *,NvmeCmd *,NvmeRequest *);
+//uint16_t nvme_dsm (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_flush(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_compare(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_write_zeros(NvmeCtrl *,NvmeNamespace *,NvmeCmd *,NvmeRequest *);
+//uint16_t nvme_rw (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
 
-#if LIGHTNVM
 /* LNVM functions */
-int     lnvm_init(NvmeCtrl *);
-uint8_t lnvm_dev(NvmeCtrl *);
-void    lnvm_set_default(LnvmCtrl *);
-void    lightnvm_exit(NvmeCtrl *);
-void    lnvm_init_id_ctrl(LnvmIdCtrl *);
+//int lnvm_init(NvmeCtrl *);
+//uint8_t lnvm_dev(NvmeCtrl *);
+//void lnvm_set_default(LnvmCtrl *);
+//void lightnvm_exit(NvmeCtrl *);
+//void lnvm_init_id_ctrl(LnvmIdCtrl *);
 
 /* LNVM Admin cmd */
-uint16_t lnvm_identity(NvmeCtrl *, NvmeCmd *);
-uint16_t lnvm_get_l2p_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
-uint16_t lnvm_get_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
-uint16_t lnvm_set_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+//uint16_t lnvm_identity(NvmeCtrl *, NvmeCmd *);
+//uint16_t lnvm_get_l2p_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+//uint16_t lnvm_get_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
+//uint16_t lnvm_set_bb_tbl(NvmeCtrl *, NvmeCmd *, NvmeRequest *);
 
 /* LNVM IO cmd */
-uint16_t lnvm_erase_sync(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
-uint16_t lnvm_rw(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
-#endif /* LIGHTNVM */
+//uint16_t lnvm_erase_sync(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
+//uint16_t lnvm_rw(NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
+//
+/* ELEOS IO cmd */
+//uint16_t nvme_eleos_flush (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
+//uint16_t nvme_eleos_read (NvmeCtrl *, NvmeNamespace *, NvmeCmd *, NvmeRequest *);
 
 #endif /* NVME_H */

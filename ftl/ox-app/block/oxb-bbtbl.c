@@ -1,8 +1,7 @@
 /* OX: Open-Channel NVM Express SSD Controller
- * 
- *  - LightNVM Flash Translation Layer (Bad block management)
+ *  - AppNVM Flash Translation Layer (Bad Block Table Management)
  *
- * Copyright 2017 IT University of Copenhagen
+ * Copyright 2018 IT University of Copenhagen
  * 
  * Written by Ivan Luiz Picoli <ivpi@itu.dk>
  * 
@@ -19,20 +18,21 @@
  * limitations under the License.
  */
 
+#include <libox.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <lnvm_ftl.h>
-#include <libox.h>
-
-extern struct core_struct core;
+#include <ox-app.h>
 
 /* Erases the entire channel, failed erase marks the block as bad
  * bbt -> bad block table pointer to be filled up
  * bbt_sz -> pointer to integer, function will set it up
  * ch  -> channel to be checked
  */
-static struct nvm_ppa_addr *lnvm_check_ch_bb (struct nvm_ppa_addr *bbt,
+
+extern struct core_struct core;
+
+static int oxb_check_ch_bb (struct nvm_ppa_addr *bbt,
                       uint16_t *bbt_sz,  struct nvm_channel *ch, uint8_t type)
 {
     int ret = 0, i, pl, plc, pg, blk, lun, bb_count = 0;
@@ -41,23 +41,23 @@ static struct nvm_ppa_addr *lnvm_check_ch_bb (struct nvm_ppa_addr *bbt,
     struct nvm_io_data *bufw, *bufr;
     uint8_t n_pl = g->n_of_planes;
 
-    log_info("    [lnvm: Checking bad blocks on channel %d...]\n",ch->ch_id);
+    log_info("    [ox-blk: Checking bad blocks on channel %d...]\n",ch->ch_id);
 
     bufw = ftl_alloc_pg_io (ch);
     if (!bufw)
-        return NULL;
+        return -1;
 
     bufr = ftl_alloc_pg_io (ch);
     if (!bufr) {
         ftl_free_pg_io (bufw);
-        return NULL;
+        return -1;
     }
 
-    cmd = ox_malloc(sizeof(struct nvm_mmgr_io_cmd), OX_MEM_FTL_LNVM);
+    cmd = ox_malloc(sizeof(struct nvm_mmgr_io_cmd), OX_MEM_OXAPP);
     if (!cmd) {
         ftl_free_pg_io (bufr);
         ftl_free_pg_io (bufw);
-        return NULL;
+        return -1;
     }
 
     memset (bufw->buf, NVM_MAGIC, bufw->buf_sz);
@@ -83,7 +83,7 @@ static struct nvm_ppa_addr *lnvm_check_ch_bb (struct nvm_ppa_addr *bbt,
                 if ((ret = ox_submit_sync_io (ch, cmd, NULL, MMGR_ERASE_BLK)))
                     goto MARK_BLK;
 
-                if ((pl == n_pl - 1) && (type == LNVM_BBT_FULL)) {
+                if ((pl == n_pl - 1) && (type == APP_BBT_FULL)) {
                     for (pg = 0; pg < ch->geometry->pg_per_blk; pg++) {
                         cmd->ppa.g.pg = pg;
                         
@@ -114,34 +114,34 @@ MARK_BLK:
 
                     bb_count = bb_count + n_pl;
                     bbt = ox_realloc(bbt, sizeof(struct nvm_ppa_addr) *
-                                                    bb_count, OX_MEM_FTL_LNVM);
+                                                       bb_count, OX_MEM_OXAPP);
 
                     /* fill up bb table for all planes */
                     for (i = n_pl; i > 0; i--) {
                         memcpy(&bbt[bb_count - i], &cmd->ppa, sizeof(uint64_t));
                         bbt[bb_count - i].g.pl = n_pl - i;
                     }
-                    log_info("      [lnvm: bad block: lun %d, blk %d\n",
+                    log_info("      [ox-blk: bad block: lun %d, blk %d\n",
                                                                       lun, blk);
                 }
             }
             printf("\r");
-            printf(" [lnvm: Channel %d. Creating bad block table... (%d/%d)]",
-                  ch->ch_id, (lun * ch->geometry->blk_per_lun * n_pl) +
+            printf(" [ox-blk: Channel %d. Creating bad block table (type %d)... (%d/%d)]",
+                  ch->ch_id, type, (lun * ch->geometry->blk_per_lun * n_pl) +
                   ((blk+1) * n_pl),
                   ch->geometry->blk_per_lun * ch->geometry->lun_per_ch * n_pl);
             fflush(stdout);
         }
     }
-    ox_free (cmd, OX_MEM_FTL_LNVM);
+    ox_free(cmd, OX_MEM_OXAPP);
     ftl_free_pg_io (bufr);
     ftl_free_pg_io (bufw);
     *bbt_sz = bb_count;
 
-    return bbt;
+    return 0;
 }
 
-static uint16_t lnvm_count_bb (struct lnvm_channel *lch)
+static uint16_t oxb_count_bb (struct app_channel *lch)
 {
     int i, bb = 0;
 
@@ -152,18 +152,18 @@ static uint16_t lnvm_count_bb (struct lnvm_channel *lch)
     return bb;
 }
 
-int lnvm_flush_bbt (struct lnvm_channel *lch)
+static int oxb_bbt_byte_flush (struct app_channel *lch)
 {
     int ret, pg;
-    struct lnvm_bbtbl nvm_bbt;
+    struct app_bbtbl nvm_bbt;
     struct nvm_io_data *io;
     struct nvm_ppa_addr ppa;
     struct nvm_channel *ch = lch->ch;
-    struct lnvm_bbtbl *bbt = lch->bbtbl;
+    struct app_bbtbl *bbt = lch->bbtbl;
     uint32_t pg_sz = ch->geometry->pg_size;
 
     if (bbt->bb_sz > pg_sz) {
-        log_err("[lnvm ERR: Ch %d -> Maximum Bad block Table size: %d blocks\n",
+        log_err("[ox-blk ERR: Ch %d -> Maximum Bad block Table size: %d blocks\n",
                                                             ch->ch_id, pg_sz);
         return -1;
     }
@@ -175,7 +175,7 @@ int lnvm_flush_bbt (struct lnvm_channel *lch)
     pg = 0;
     do {
         ppa.ppa = 0;
-        ppa.g.blk = FTL_LNVM_RSV_BLK;
+        ppa.g.blk = lch->bbt_blk;
         ppa.g.pg = pg;
         ret = ftl_pg_io_switch (lch->ch, MMGR_READ_PG,
                                   (void **) io->pl_vec, &ppa, NVM_IO_RESERVED);
@@ -183,7 +183,7 @@ int lnvm_flush_bbt (struct lnvm_channel *lch)
         /* get info from OOB area (16 bytes - header of struct ftl_bbtbl) */
         memcpy(&nvm_bbt, io->oob_vec[0], 16);
 
-        if (ret || nvm_bbt.magic != NVM_MAGIC)
+        if (ret || nvm_bbt.byte.magic != NVM_MAGIC)
             break;
 
         pg++;
@@ -193,7 +193,7 @@ int lnvm_flush_bbt (struct lnvm_channel *lch)
         goto OUT;
 
     if (pg == ch->geometry->pg_per_blk) {
-        if (ftl_io_rsv_blk (lch->ch, MMGR_ERASE_BLK, NULL, FTL_LNVM_RSV_BLK, 0))
+        if (ftl_io_rsv_blk (lch->ch, MMGR_ERASE_BLK, NULL, lch->bbt_blk, 0))
             goto OUT;
         pg = 0;
     }
@@ -202,21 +202,21 @@ int lnvm_flush_bbt (struct lnvm_channel *lch)
     memset (io->buf, 0, pg_sz);
 
     /* set info to OOB area */
-    bbt->magic = NVM_MAGIC;
-    bbt->bb_count = lnvm_count_bb (lch);
+    bbt->byte.magic = NVM_MAGIC;
+    bbt->bb_count = oxb_count_bb (lch);
     memcpy (io->oob_vec[0], bbt, 16);
 
     /* set bad block table */
     memcpy (io->buf, bbt->tbl, bbt->bb_sz);
 
     ppa.ppa = 0;
-    ppa.g.blk = FTL_LNVM_RSV_BLK;
+    ppa.g.blk = lch->bbt_blk;
     ppa.g.pg = pg;
     ret = ftl_pg_io_switch (lch->ch, MMGR_WRITE_PG,
                                   (void **) io->pl_vec, &ppa, NVM_IO_RESERVED);
     if (ret) {
         pg = 0;
-        if (ftl_io_rsv_blk (lch->ch, MMGR_ERASE_BLK, NULL, FTL_LNVM_RSV_BLK, 0))
+        if (ftl_io_rsv_blk (lch->ch, MMGR_ERASE_BLK, NULL, lch->bbt_blk, 0))
             goto OUT;
         ppa.g.pg = pg;
         ret = ftl_pg_io_switch (lch->ch, MMGR_WRITE_PG,
@@ -228,16 +228,16 @@ OUT:
     return ret;
 }
 
-int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt,
-                                                                 uint8_t type)
+static int oxb_bbt_byte_create (struct app_channel *lch, uint8_t type)
 {
     int i, rsv, l_addr, b_addr, pl_addr, n_pl;
     struct nvm_ppa_addr *bbt_tmp;
     uint16_t bb_count = 0;
     struct nvm_channel *ch = lch->ch;
+    struct app_bbtbl *bbt = lch->bbtbl;
 
     n_pl = ch->geometry->n_of_planes;
-    bbt_tmp = ox_malloc (sizeof(struct nvm_ppa_addr), OX_MEM_FTL_LNVM);
+    bbt_tmp = ox_malloc (sizeof(struct nvm_ppa_addr), OX_MEM_OXAPP);
     if (!bbt_tmp)
         return -1;
 
@@ -259,15 +259,18 @@ int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt,
         bbt->tbl[l_addr + b_addr + pl_addr] = LNVM_BBT_DMRK;
     }
 
-    if (type == LNVM_BBT_FULL || type == LNVM_BBT_ERASE) {
+    if (type == APP_BBT_FULL || type == APP_BBT_ERASE) {
         /* Check for bad blocks in the whole channel */
-        bbt_tmp = lnvm_check_ch_bb (bbt_tmp, &bb_count, ch, type);
-        if (!bbt_tmp)
+        if (oxb_check_ch_bb (bbt_tmp, &bb_count, ch, type)) {
+            ox_free (bbt_tmp, OX_MEM_OXAPP);
             return -1;
+        }
+
     } else {
-        log_info("  [lnvm: Emergency bad block table created on channel %d. "
+        log_info("  [ox-blk: Emergency bad block table created on channel %d. "
                "A FAST or FULL scan is recommended.]\n", ch->ch_id);
-        printf ("\n  [WARNING: Emergency bad block table created on channel %d."
+        if (core.debug)
+            printf ("\n  [WARNING: Emergency bad block table created on channel %d."
                 "\n   ! FAST or FULL scan is recommended. Use 'admin create-bbt'\n",
                                                                      ch->ch_id);
     }
@@ -278,26 +281,25 @@ int lnvm_bbt_create (struct lnvm_channel *lch, struct lnvm_bbtbl *bbt,
         l_addr = bbt_tmp[i].g.lun * ch->geometry->blk_per_lun * n_pl;
         b_addr = bbt_tmp[i].g.blk * n_pl;
         pl_addr = bbt_tmp[i].g.pl;
-        bbt->tbl[l_addr + b_addr + pl_addr] = LNVM_BBT_DMRK;
+        bbt->tbl[l_addr + b_addr + pl_addr] = APP_BBT_DMRK;
     }
 
-    ox_free (bbt_tmp, OX_MEM_FTL_LNVM);
-
+    ox_free (bbt_tmp, OX_MEM_OXAPP);
     return 0;
 }
 
-int lnvm_get_bbt_nvm (struct lnvm_channel *lch)
+static int oxb_bbt_byte_load (struct app_channel *lch)
 {
     int ret, pg;
-    struct lnvm_bbtbl nvm_bbt;
+    struct app_bbtbl nvm_bbt;
     struct nvm_io_data *io;
     struct nvm_ppa_addr ppa;
     struct nvm_channel *ch = lch->ch;
-    struct lnvm_bbtbl *bbt = lch->bbtbl;
+    struct app_bbtbl *bbt = lch->bbtbl;
     uint32_t pg_sz = ch->geometry->pg_size;
 
     if (bbt->bb_sz > pg_sz) {
-        log_err("[lnvm ERR: Ch %d -> Maximum Bad block Table size: %d blocks\n",
+        log_err("[ox-blk ERR: Ch %d -> Maximum Bad block Table size: %d blocks\n",
                                                             ch->ch_id, pg_sz);
         return -1;
     }
@@ -309,7 +311,7 @@ int lnvm_get_bbt_nvm (struct lnvm_channel *lch)
     pg = 0;
     do {
         ppa.ppa = 0;
-        ppa.g.blk = FTL_LNVM_RSV_BLK;
+        ppa.g.blk = lch->bbt_blk;
         ppa.g.pg = pg;
         ret = ftl_pg_io_switch (lch->ch, MMGR_READ_PG,
                                   (void **) io->pl_vec, &ppa, NVM_IO_RESERVED);
@@ -317,7 +319,7 @@ int lnvm_get_bbt_nvm (struct lnvm_channel *lch)
         /* get info from OOB area (16 bytes - header of struct ftl_bbtbl) */
         memcpy(&nvm_bbt, io->oob_vec[0], 16);
 
-        if (ret || nvm_bbt.magic != NVM_MAGIC)
+        if (ret || nvm_bbt.byte.magic != NVM_MAGIC)
             break;
 
         /* copy bad block table to channel */
@@ -330,17 +332,42 @@ int lnvm_get_bbt_nvm (struct lnvm_channel *lch)
         goto OUT;
 
     if (!pg) {
-        ret = ftl_io_rsv_blk (lch->ch, MMGR_ERASE_BLK, NULL, FTL_LNVM_RSV_BLK, 0);
+        ret = ftl_io_rsv_blk (lch->ch, MMGR_ERASE_BLK, NULL, lch->bbt_blk, 0);
 
         /* tells the caller that the block is new and must be written */
-        bbt->magic = NVM_MAGIC;
+        bbt->byte.magic = NVM_MAGIC;
         goto OUT;
     }
 
-    bbt->magic = 0;
-    bbt->bb_count = lnvm_count_bb (lch);
+    bbt->byte.magic = 0;
+    bbt->bb_count = oxb_count_bb (lch);
 
 OUT:
     ftl_free_pg_io (io);
     return ret;
+}
+
+static uint8_t *oxb_bbt_byte_get (struct app_channel *lch, uint16_t lun)
+{
+    struct app_bbtbl *bbt = lch->bbtbl;
+    size_t lun_sz = sizeof (uint8_t) * lch->ch->geometry->blk_per_lun *
+                                                lch->ch->geometry->n_of_planes;
+
+    if (!bbt->tbl)
+        return NULL;
+
+    return bbt->tbl + (lun * lun_sz);
+}
+
+static struct app_global_bbt oxblk_bbt = {
+    .mod_id    = OXBLK_BBT,
+    .name      = "OX-BLOCK-BBT",
+    .create_fn = oxb_bbt_byte_create,
+    .flush_fn  = oxb_bbt_byte_flush,
+    .load_fn   = oxb_bbt_byte_load,
+    .get_fn    = oxb_bbt_byte_get
+};
+
+void oxb_bbt_byte_register (void) {
+    app_mod_register (APPMOD_BBT, OXBLK_BBT, &oxblk_bbt);
 }

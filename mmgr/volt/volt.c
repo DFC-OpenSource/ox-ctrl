@@ -1,30 +1,56 @@
+/* OX: Open-Channel NVM Express SSD Controller
+ * 
+ *  - VOLT: Volatile storage and media manager
+ *
+ * Copyright 2017 IT University of Copenhagen
+ * 
+ * Written by Ivan Luiz Picoli <ivpi@itu.dk>
+ * 
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *    http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <stdio.h>
-#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <mqueue.h>
 #include <syslog.h>
-#include "volt.h"
-#include "../../include/ssd.h"
-#include "../../include/ox-mq.h"
-#include "../../include/uatomic.h"
+#include <string.h>
+#include <volt.h>
+#include <ox-uatomic.h>
+#include <libox.h>
+#include <ox-mq.h>
 
-static atomic_t       nextprp[VOLT_CHIP_COUNT];
-static pthread_mutex_t  prpmap_mutex[VOLT_CHIP_COUNT];
-static uint32_t         prp_map[VOLT_CHIP_COUNT];
+static u_atomic_t                nextprp[VOLT_CHIP_COUNT];
+static pthread_spinlock_t        prpmap_spin[VOLT_CHIP_COUNT];
+static volatile uint32_t         prp_map[VOLT_CHIP_COUNT];
 
 static VoltCtrl             *volt;
 static struct nvm_mmgr      volt_mmgr;
 static void                 **dma_buf;
 extern struct core_struct   core;
+uint8_t                     disk;
+
+static const char *volt_disk = "volt_disk";
 
 static int volt_start_prp_map(void)
 {
     int i;
 
     for (i = 0; i < VOLT_CHIP_COUNT; i++) {
-        nextprp[i].counter = ATOMIC_INIT_RUNTIME(0);
-        pthread_mutex_init (&prpmap_mutex[i], NULL);
-        memset(&prp_map[i], 0x0, sizeof (uint32_t));
+        nextprp[i].counter = U_ATOMIC_INIT_RUNTIME(0);
+        pthread_spin_init (&prpmap_spin[i], 0);
+        prp_map[i] = 0;
     }
 
     return 0;
@@ -32,34 +58,36 @@ static int volt_start_prp_map(void)
 
 static void volt_set_prp_map(uint32_t index, uint32_t ch, uint8_t flag)
 {
-    pthread_mutex_lock(&prpmap_mutex[ch]);
+    pthread_spin_lock(&prpmap_spin[ch]);
     prp_map[ch] = (flag)
             ? prp_map[ch] | (1 << (index - 1))
             : prp_map[ch] ^ (1 << (index - 1));
-    pthread_mutex_unlock(&prpmap_mutex[ch]);
+    pthread_spin_unlock(&prpmap_spin[ch]);
 }
 
 static uint32_t volt_get_next_prp(struct volt_dma *dma, uint32_t ch){
     uint32_t next = 0;
 
     do {
-        pthread_mutex_lock(&prpmap_mutex[ch]);
+        pthread_spin_lock(&prpmap_spin[ch]);
 
-        next = atomic_read(&nextprp[ch]);
+        next = u_atomic_read(&nextprp[ch]);
         if (next == VOLT_DMA_SLOT_CH)
             next = 1;
         else
             next++;
-        atomic_set(&nextprp[ch], next);
+        u_atomic_set(&nextprp[ch], next);
 
         if (prp_map[ch] & (1 << (next - 1))) {
-            pthread_mutex_unlock(&prpmap_mutex[ch]);
+            pthread_spin_unlock(&prpmap_spin[ch]);
             usleep(1);
             continue;
         }
-        pthread_mutex_unlock(&prpmap_mutex[ch]);
 
-        volt_set_prp_map(next, ch, 0x1);
+        /* set prp_map instantly */
+        prp_map[ch] |= 1 << (next - 1);
+
+        pthread_spin_unlock(&prpmap_spin[ch]);
 
         dma->prp_index = next;
 
@@ -92,12 +120,12 @@ static void volt_sub_mem(uint64_t bytes)
 
 static void *volt_alloc (uint64_t sz)
 {
-    return malloc(volt_add_mem (sz));
+    return ox_malloc(volt_add_mem (sz), OX_MEM_MMGR_VOLT);
 }
 
 static void volt_free (void *ptr, uint64_t sz)
 {
-    free (ptr);
+    ox_free (ptr, OX_MEM_MMGR_VOLT);
     volt_sub_mem(sz);
 }
 
@@ -300,15 +328,15 @@ static void volt_oob_reorder (uint8_t *oob, uint32_t map)
 {
     int i;
     uint8_t oob_off = 0;
-    uint32_t meta_sz = LNVM_SEC_OOBSZ * VOLT_SECTOR_COUNT;
+    uint32_t meta_sz = VOLT_OOB_SIZE;
 
     for (i = 0; i < VOLT_SECTOR_COUNT - 1; i++)
         if (map & (1 << i))
             memcpy (oob + oob_off,
-                    oob + oob_off + LNVM_SEC_OOBSZ,
-                    meta_sz - oob_off - LNVM_SEC_OOBSZ);
+                    oob + oob_off + VOLT_SEC_OOB_SIZE,
+                    meta_sz - oob_off - VOLT_SEC_OOB_SIZE);
         else
-            oob_off += LNVM_SEC_OOBSZ;
+            oob_off += VOLT_SEC_OOB_SIZE;
 }
 
 static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
@@ -325,8 +353,8 @@ static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
                                                              NVM_DMA_TO_HOST;
             break;
         case MMGR_WRITE_PG:
-            direction = (nvm_cmd->sync_count) ? NVM_DMA_SYNC_WRITE :
-                                                             NVM_DMA_FROM_HOST;
+            direction = (nvm_cmd->sync_count) ?
+                                        NVM_DMA_SYNC_WRITE : NVM_DMA_FROM_HOST;
             break;
         default:
             return -1;
@@ -349,7 +377,15 @@ static int volt_host_dma_helper (struct nvm_mmgr_io_cmd *nvm_cmd)
                                             nvm_cmd->md_sz && c == dma_sec - 1)
             volt_oob_reorder (oob_addr, sec_map);
 
-        ret = nvm_dma ((void *)(dma->virt_addr +
+        if (c == dma_sec - 1 && nvm_cmd->force_sync_md)
+            direction = (nvm_cmd->cmdtype == MMGR_READ_PG)
+                                      ? NVM_DMA_SYNC_READ : NVM_DMA_SYNC_WRITE;
+
+        if (c < dma_sec - 1 && nvm_cmd->force_sync_data[c])
+            direction = (nvm_cmd->cmdtype == MMGR_READ_PG)
+                                      ? NVM_DMA_SYNC_READ : NVM_DMA_SYNC_WRITE;
+
+        ret = ox_dma ((void *)(dma->virt_addr +
                                 nvm_cmd->sec_sz * c), prp, dma_sz, direction);
         if (ret) break;
     }
@@ -370,7 +406,8 @@ static void volt_callback (void *opaque)
         if (nvm_cmd->cmdtype == MMGR_READ_PG)
             ret = volt_host_dma_helper (nvm_cmd);
 
-        nvm_cmd->status = (ret) ? NVM_IO_FAIL : NVM_IO_SUCCESS;
+        if (nvm_cmd->status != NVM_IO_FAIL)
+            nvm_cmd->status = (ret) ? NVM_IO_FAIL : NVM_IO_SUCCESS;
     } else {
         nvm_cmd->status = NVM_IO_FAIL;
     }
@@ -379,7 +416,7 @@ OUT:
     if (nvm_cmd->cmdtype == MMGR_WRITE_PG || nvm_cmd->cmdtype == MMGR_READ_PG)
         volt_set_prp_map(dma->prp_index, nvm_cmd->ppa.g.ch, 0x0);
 
-    nvm_callback(nvm_cmd);
+    ox_mmgr_callback (nvm_cmd);
 }
 
 static void volt_nand_dma (void *paddr, void *buf, size_t sz, uint8_t dir)
@@ -448,7 +485,10 @@ static void volt_execute_io (struct ox_mq_entry *req)
     ret = volt_process_io(cmd);
 
     if (ret) {
-        log_err ("[ERROR: Cmd %x not completed. Aborted.]\n", cmd->cmdtype);
+        if (core.debug)
+            log_err ("[volt: Cmd 0x%x NOT completed. (%d/%d/%d/%d/%d)]\n",
+                cmd->cmdtype, cmd->ppa.g.ch, cmd->ppa.g.lun, cmd->ppa.g.blk,
+                cmd->ppa.g.pl, cmd->ppa.g.pg);
         cmd->status = NVM_IO_FAIL;
         goto COMPLETE;
     }
@@ -458,6 +498,10 @@ static void volt_execute_io (struct ox_mq_entry *req)
 COMPLETE:
     retry = NVM_QUEUE_RETRY;
     do {
+        /* Mark output as failed */
+        if (cmd->status != NVM_IO_SUCCESS && req->out_row)
+            req->out_row->failed = cmd->status;
+
         ret = ox_mq_complete_req(volt->mq, req);
         if (ret) {
             retry--;
@@ -546,7 +590,7 @@ static int volt_write_page (struct nvm_mmgr_io_cmd *cmd_nvm)
     if (volt_prepare_rw(cmd_nvm))
         goto CLEAN;
 
-    if(volt_enqueue_io(cmd_nvm))
+    if (volt_enqueue_io (cmd_nvm))
         goto CLEAN;
 
     return 0;
@@ -569,20 +613,6 @@ CLEAN:
     log_err("[MMGR Erase ERROR: NVM library returned -1]\n");
     cmd->status = NVM_IO_FAIL;
     return -1;
-}
-
-static void volt_exit (struct nvm_mmgr *mmgr)
-{
-    int i;
-    volt_clean_mem();
-    volt->status.active = 0;
-    ox_mq_destroy(volt->mq);
-    for (i = 0; i < mmgr->geometry->n_of_ch; i++) {
-        pthread_mutex_destroy(&prpmap_mutex[i]);
-        free(mmgr->ch_info[i].mmgr_rsv_list);
-        free(mmgr->ch_info[i].ftl_rsv_list);
-    }
-    free (volt);
 }
 
 static int volt_set_ch_info (struct nvm_channel *ch, uint16_t nc)
@@ -608,13 +638,14 @@ static int volt_get_ch_info (struct nvm_channel *ch, uint16_t nc)
         }
 
         ch[i].ns_pgs = VOLT_VIRTUAL_LUNS *
-                       VOLT_BLOCK_COUNT *
+                       ch->geometry->blk_per_lun *
                        VOLT_PLANE_COUNT *
-                       VOLT_PAGE_COUNT;
+                       ch->geometry->pg_per_blk;
 
         ch[i].mmgr_rsv = VOLT_RSV_BLK;
         trsv = ch[i].mmgr_rsv * VOLT_PLANE_COUNT;
-        ch[i].mmgr_rsv_list = malloc (trsv * sizeof(struct nvm_ppa_addr));
+        ch[i].mmgr_rsv_list = ox_malloc (trsv * sizeof(struct nvm_ppa_addr),
+                                                                  OX_MEM_MMGR);
 
         if (!ch[i].mmgr_rsv_list)
             return EMEM;
@@ -632,7 +663,7 @@ static int volt_get_ch_info (struct nvm_channel *ch, uint16_t nc)
         }
 
         ch[i].ftl_rsv = 0;
-        ch[i].ftl_rsv_list = malloc (sizeof(struct nvm_ppa_addr));
+        ch[i].ftl_rsv_list = ox_malloc(sizeof(struct nvm_ppa_addr),OX_MEM_MMGR);
         if (!ch[i].ftl_rsv_list)
             return EMEM;
 
@@ -665,27 +696,143 @@ static void volt_req_timeout (void **opaque, int counter)
     }
 }
 
+static void volt_stats_fill_row (struct oxmq_output_row *row, void *opaque)
+{
+    struct nvm_mmgr_io_cmd *cmd;
+
+    cmd = (struct nvm_mmgr_io_cmd *) opaque;
+
+    row->lba = 0;
+    row->ch = cmd->ppa.g.ch;
+    row->lun = cmd->ppa.g.lun;
+    row->blk = cmd->ppa.g.blk;
+    row->pg = cmd->ppa.g.pg;
+    row->pl = cmd->ppa.g.pl;
+    row->sec = cmd->ppa.g.sec;
+    row->type = (cmd->cmdtype == MMGR_READ_PG)  ? 'R' :
+                (cmd->cmdtype == MMGR_WRITE_PG) ? 'W' : 'E';
+    row->failed = 0;
+    row->datacmp = 0;
+    row->size = cmd->n_sectors * cmd->sec_sz;
+}
+
 struct ox_mq_config volt_mq = {
+    .name       = "VOLT",
     .n_queues   = VOLT_CHIP_COUNT,
     .q_size     = VOLT_QUEUE_SIZE,
     .sq_fn      = volt_execute_io,
     .cq_fn      = volt_callback,
     .to_fn      = volt_req_timeout,
+    .output_fn  = volt_stats_fill_row,
     .to_usec    = 0,
-    .flags      = 0x0,
+    .flags      = 0x0
 };
 
 /* DEBUG (disabled): Thread to show multi-queue statistics */
-static void *volt_queue_show (void *arg)
+/*static void *volt_queue_show (void *arg)
 {
-    /*
+    
     while (1) {
         usleep (200000);
         ox_mq_show_stats(volt->mq);
     }
-    */
 
     return NULL;
+}*/
+
+static int volt_disk_flush (void)
+{
+    FILE *file;
+    uint32_t blk_i, pg_i;
+    struct nvm_mmgr_geometry *geo = volt_mmgr.geometry;
+    uint32_t pg_sz = geo->pg_size + (geo->sec_oob_sz * geo->sec_per_pg);
+    uint32_t tot_blk = geo->n_of_planes * geo->blk_per_lun * geo->lun_per_ch *
+                                                                   geo->n_of_ch;
+    file = fopen(volt_disk, "w+");
+    for (blk_i = 0; blk_i < tot_blk; blk_i++) {
+        for (pg_i = 0; pg_i < geo->pg_per_blk; pg_i++) {
+            if (fwrite(volt->blocks[blk_i].pages[pg_i].data, pg_sz, 1, file)<1){
+                fclose (file);
+                return -1;
+            }
+        }
+    }
+
+    fclose (file);
+    return 0;
+}
+
+static int volt_disk_load (void)
+{
+    FILE *file;
+    uint32_t blk_i, pg_i;
+    struct nvm_mmgr_geometry *geo = volt_mmgr.geometry;
+    uint32_t pg_sz = geo->pg_size + (geo->sec_oob_sz * geo->sec_per_pg);
+    uint32_t tot_blk = geo->n_of_planes * geo->blk_per_lun * geo->lun_per_ch *
+                                                                   geo->n_of_ch;
+    file = fopen(volt_disk, "r");
+    for (blk_i = 0; blk_i < tot_blk; blk_i++) {
+        for (pg_i = 0; pg_i < geo->pg_per_blk; pg_i++) {
+            if (fread(volt->blocks[blk_i].pages[pg_i].data, pg_sz, 1, file)<1) {
+                fclose (file);
+                return -1;
+            }
+        }
+    }
+
+    fclose (file);
+    return 0;
+}
+
+static int volt_init_disk (void)
+{
+    FILE *file;
+
+    file = fopen(volt_disk, "r");
+    if (!file){
+        printf(" [volt: Creating disk...]\n");
+
+        if (volt_disk_flush ())
+            goto WERR;
+    } else {
+        printf(" [volt: Loading disk...]\n");
+
+        fclose (file);
+        if (volt_disk_load ())
+            goto RERR;
+    }
+
+    printf(" [volt: Disk is ready.]\n");
+    return 0;
+
+WERR:
+    remove (volt_disk);
+    printf(" [volt: Disk creation failed!]\n");
+    return -1;
+RERR:
+    printf(" [volt: Disk loading failed!]\n");
+    return -1;
+}
+
+static void volt_exit (struct nvm_mmgr *mmgr)
+{
+    int i;
+
+    if (disk) {
+        printf(" [volt: Flushing disk...]\n");
+        if (volt_disk_flush ())
+            printf (" [volt: Disk flush FAILED.]\n");
+    }    
+
+    volt_clean_mem();
+    volt->status.active = 0;
+    ox_mq_destroy(volt->mq);
+    for (i = 0; i < mmgr->geometry->n_of_ch; i++) {
+        pthread_spin_destroy (&prpmap_spin[i]);
+        ox_free(mmgr->ch_info[i].mmgr_rsv_list, OX_MEM_MMGR);
+        ox_free(mmgr->ch_info[i].ftl_rsv_list, OX_MEM_MMGR);
+    }
+    ox_free (volt, OX_MEM_MMGR_VOLT);
 }
 
 static int volt_init(void)
@@ -694,7 +841,7 @@ static int volt_init(void)
     int tot_blk = geo->n_of_planes * geo->blk_per_lun * geo->lun_per_ch *
                                                                    geo->n_of_ch;
 
-    volt = malloc (sizeof (VoltCtrl));
+    volt = ox_malloc (sizeof (VoltCtrl), OX_MEM_MMGR_VOLT);
     if (!volt)
         return -1;
 
@@ -721,6 +868,11 @@ static int volt_init(void)
         goto OUT;
     }
 
+    if (disk && volt_init_disk()) {
+        volt_clean_mem();
+        goto OUT;
+    }
+
     sprintf(volt_mq.name, "%s", "VOLT_MMGR");
     volt->mq = ox_mq_init(&volt_mq);
     if (!volt->mq) {
@@ -729,19 +881,21 @@ static int volt_init(void)
     }
 
     /* DEBUG: Thread to show multi-queue statistics */
-    pthread_t debug_th;
-    pthread_create(&debug_th,NULL,volt_queue_show,NULL);
+    /*pthread_t debug_th;
+    if (pthread_create(&debug_th,NULL,volt_queue_show,NULL)) {
+        ox_mq_destroy (volt->mq);
+        volt_clean_mem ();
+        goto OUT;
+    }*/
 
     volt->status.ready = 1; /* ready to use */
 
     log_info(" [volt: Volatile memory usage: %lu Mb]\n",
                                       volt->status.allocated_memory / 1048576);
-    printf(" [volt: Volatile memory usage: %lu Mb]\n",
-                                      volt->status.allocated_memory / 1048576);
     return 0;
 
 OUT:
-    free (volt);
+    ox_free (volt, OX_MEM_MMGR_VOLT);
     printf(" [volt: Not initialized! Memory allocation failed.]\n");
     printf(" [volt: Volatile memory usage: %lu bytes.]\n",
                                                 volt->status.allocated_memory);
@@ -768,19 +922,53 @@ struct nvm_mmgr_geometry volt_geo = {
     .sec_oob_sz     = VOLT_OOB_SIZE / VOLT_SECTOR_COUNT
 };
 
-int mmgr_volt_init(void)
+static int __mmgr_volt_init (uint8_t flag)
 {
     int ret = 0;
 
+    if (!ox_mem_create_type ("MMGR_VOLT", OX_MEM_MMGR_VOLT))
+        return -1;
+
+#ifdef CONFIG_VOLT_GB
+    if (CONFIG_VOLT_GB != 4 && CONFIG_VOLT_GB != 8 && CONFIG_VOLT_GB != 16 &&
+                               CONFIG_VOLT_GB != 32 && CONFIG_VOLT_GB != 64) {
+        printf (" VOLT WARNING: VOLT_GB options: 4, 8, 16, 32, 64."
+                                                        " Default: 4 GB.\n");
+        goto DEFAULT;
+    }
+    if (CONFIG_VOLT_GB > 4)
+        volt_geo.blk_per_lun += 64;
+    if (CONFIG_VOLT_GB > 8)
+        volt_geo.pg_per_blk += 64;
+    if (CONFIG_VOLT_GB > 16)
+        volt_geo.blk_per_lun += 64;
+    if (CONFIG_VOLT_GB > 32)
+        volt_geo.pg_per_blk += 64;
+#endif /* CONFIG_VOLT_GB */
+
+DEFAULT:
     volt_mmgr.name     = "VOLT";
     volt_mmgr.ops      = &volt_ops;
     volt_mmgr.geometry = &volt_geo;
+    volt_mmgr.flags    = MMGR_FLAG_MIN_CP_TIME;
+
+    disk = flag;
 
     ret = volt_init();
     if(ret) {
         log_err(" [volt: Not possible to start VOLT.]\n");
-        return -1;
+        return EMMGR_REGISTER;
     }
 
-    return nvm_register_mmgr(&volt_mmgr);
+    return ox_register_mmgr(&volt_mmgr);
+}
+
+int mmgr_volt_init (void)
+{
+    return __mmgr_volt_init (1);
+}
+
+int mmgr_volt_init_nodisk (void)
+{
+    return __mmgr_volt_init (0);
 }
