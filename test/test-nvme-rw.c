@@ -61,7 +61,7 @@ void nvme_test_read (void)
     ctx[0].is_write = 1;
     ctx[0].nlb = NVMEH_BUF_SIZE / NVMEH_BLK_SZ;
 
-    /* Submit the read command and define the callback function */
+    /* Submit the write command and define the callback function */
     ret = nvmeh_write (write_buffer, NVMEH_BUF_SIZE, slba,
                                                 nvme_test_callback, &ctx[0]);
     if (ret) {
