@@ -20,8 +20,6 @@
  * 
  */
 
-#include <ox-fabrics.h>
-
 #ifndef NVME_HOST_H
 #define NVME_HOST_H
 
