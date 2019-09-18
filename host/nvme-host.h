@@ -95,7 +95,7 @@ int  nvmeh_read (uint8_t *buf, uint64_t size, uint64_t slba,
 /**
  * Writes data to an OX NVMe device.
  * 
- * @param buf - Memory pointer containing the date to be written.
+ * @param buf - Memory pointer containing the data to be written.
  * @param size - Data size to be written starting at 'slba'.
  * @param slba - Starting logical block address (each logical block is
  *                  4096 bytes in size, the only size supported for now).
