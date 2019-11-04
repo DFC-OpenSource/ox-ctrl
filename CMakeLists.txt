@@ -79,6 +79,13 @@ install(TARGETS ox-mmgr-volt DESTINATION lib COMPONENT lib)
 #target_link_libraries ( ox-mmgr-ocssd-1.2 lightnvm )
 #install(TARGETS ox-mmgr-ocssd-1.2 DESTINATION lib COMPONENT lib)
 
+# UNCOMMENT FOR OPEN-CHANNEL SSD V2.0 SUPPORT (first, install liblightnvm v0.1.8)
+set(SRC_MMGR_OCSSD_2_0 ${PROJECT_SOURCE_DIR}/mmgr/ocssd-2.0/ocssd-2_0.c)
+add_library ( ox-mmgr-ocssd-2.0 STATIC ${SRC_MMGR_OCSSD_2_0} )
+target_link_libraries ( ox-mmgr-ocssd-2.0 ox )
+target_link_libraries ( ox-mmgr-ocssd-2.0 lightnvm )
+install(TARGETS ox-mmgr-ocssd-2.0 DESTINATION lib COMPONENT lib)
+
 # OX Flash Translation Layers Libraries
 
 set(SRC_FTL_LNVM
@@ -177,6 +184,16 @@ target_link_libraries ( ox-ctrl-nvme-volt ox-transport-fabrics-tgt )
 #target_link_libraries ( ox-ctrl-nvme-ocssd ox-ftl-block )
 #target_link_libraries ( ox-ctrl-nvme-ocssd ox-parser-spec )
 #target_link_libraries ( ox-ctrl-nvme-ocssd ox-transport-fabrics-tgt )
+
+#UNCOMMENT FOR OPEN-CHANNEL SSD V2.0 SUPPORT (first, install liblightnvm v0.1.8)
+set(OX_NVME_OCSSD2 ${PROJECT_SOURCE_DIR}/targets/ox-ctrl-nvme-ocssd2.c )
+add_executable ( ox-ctrl-nvme-ocssd2 ${OX_NVME_OCSSD2} )
+target_link_libraries ( ox-ctrl-nvme-ocssd2 ox )
+target_link_libraries ( ox-ctrl-nvme-ocssd2 ox-mmgr-ocssd-2.0 )
+target_link_libraries ( ox-ctrl-nvme-ocssd2 ox-ftl-lnvm )
+target_link_libraries ( ox-ctrl-nvme-ocssd2 ox-ftl-block )
+target_link_libraries ( ox-ctrl-nvme-ocssd2 ox-parser-spec )
+target_link_libraries ( ox-ctrl-nvme-ocssd2 ox-transport-fabrics-tgt )
 
 # Host Applications
 

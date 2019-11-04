@@ -767,6 +767,7 @@ int ftl_lnvm_init (void);
 int ftl_oxapp_init (void);
 int mmgr_dfcnand_init (void);
 int mmgr_ocssd_1_2_init (void);
+int mmgr_ocssd_2_0_init (void);
 int mmgr_volt_init (void);
 int mmgr_volt_init_nodisk (void);
 int parser_nvme_init (void);
