@@ -26,13 +26,15 @@ the linux kernel 4.13 or higher. Please, check the 'pblk: Host-side FTL setup' s
 
 **Publications:**  
 
-[- uFLIP-OC: Understanding Flash I/O Patterns on Open-Channel Solid-State Drives](https://dl.acm.org/citation.cfm?id=3124680.3124741)
+[- uFLIP-OC: Understanding Flash I/O Patterns on Open-Channel Solid-State Drives](https://dl.acm.org/citation.cfm?id=3124680.3124741), ApSys '17
 
-[- Improving CPU I/O Performance via SSD Controller FTL Support for Batched Writes](https://dl.acm.org/citation.cfm?id=3329925)
+[- Improving CPU I/O Performance via SSD Controller FTL Support for Batched Writes](https://dl.acm.org/citation.cfm?id=3329925), DaMoN '19
 
-[- LSM Management on Computational Storage](https://dl.acm.org/citation.cfm?id=3329927)
+[- LSM Management on Computational Storage](https://dl.acm.org/citation.cfm?id=3329927), DaMoN '19
 
-[- Programming Storage Controllers with OX](http://nvmw.ucsd.edu/nvmw2019-program/unzip/current/nvmw2019-final54.pdf)
+[- Programming Storage Controllers with OX](http://nvmw.ucsd.edu/nvmw2019-program/unzip/current/nvmw2019-final54.pdf), NVMW '19
+
+[- Open-Channel SSD (What is it Good For)](http://cidrdb.org/cidr2020/papers/p17-picoli-cidr20.pdf), CIDR'20
 
 OX was developed under a project at IT University of Copenhagen. Further work was done for BwTree computational storage at Microsoft Research. Currently, LSM-Tree computational storage techniques are under development at ITU Copenhagen.  
 
