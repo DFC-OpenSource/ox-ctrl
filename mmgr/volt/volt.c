@@ -941,9 +941,9 @@ static int __mmgr_volt_init (uint8_t flag)
     if (CONFIG_VOLT_GB > 8)
         volt_geo.pg_per_blk += 64;
     if (CONFIG_VOLT_GB > 16)
-        volt_geo.blk_per_lun += 64;
+        volt_geo.blk_per_lun += 128;
     if (CONFIG_VOLT_GB > 32)
-        volt_geo.pg_per_blk += 64;
+        volt_geo.pg_per_blk += 128;
 #endif /* CONFIG_VOLT_GB */
 
 DEFAULT:
