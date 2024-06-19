@@ -256,7 +256,8 @@ struct app_pg_oob {
     uint8_t     rsv[7];
 } __attribute__((packed));
 
-#define BLK_MD_BYTE_VEC_SZ    1024 /* max of 4096 sectors per block */
+#define BLK_MD_BYTE_VEC_SZ    2048 /* max of 1024 pgs_per_blk
+				      and 8 sectors per page */
 struct app_blk_md_entry {
     uint16_t                flags;
     struct nvm_ppa_addr     ppa;
