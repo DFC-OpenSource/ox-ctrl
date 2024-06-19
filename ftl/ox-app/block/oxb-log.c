@@ -31,7 +31,7 @@
 
 #define APP_LOG_BUF_SZ      4096    /* Buffer entries */
 #define APP_LOG_TRUNC_SZ    511     /* Standard flush size (1 flash page) */
-#define APP_LOG_ASYNCH_TO   100000
+#define APP_LOG_ASYNCH_TO   1000000
 #define APP_LOG_MQ_SZ       512
 
 #define APP_LOG_ASYNCH  0
@@ -601,7 +601,6 @@ static void appftl_log_sq (struct ox_mq_entry *req)
         pthread_mutex_unlock (&lc->flush_mutex);
         goto COMPLETE;
     }
-
     if (appftl_log_flush_buffer (0, NULL, APP_LOG_ASYNCH))
         log_err ("[log: Asynch flush not completed. cb %lu\n]", cb->ts);
 
