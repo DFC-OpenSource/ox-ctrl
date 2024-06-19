@@ -3,9 +3,9 @@ cmake_minimum_required (VERSION 2.8.3)
 project(ox C)
 
 add_definitions (-DCONFIG_VERSION=2)
-add_definitions (-DCONFIG_PATCHLEVEL=6)
+add_definitions (-DCONFIG_PATCHLEVEL=7)
 add_definitions (-DCONFIG_SUBLEVEL=0)
-add_definitions (-DCONFIG_LABEL="The Ultimate Dragon")
+add_definitions (-DCONFIG_LABEL="The Humble Bee")
 
 set(CMAKE_C_FLAGS "-fPIC -g -pthread -fopenmp -Wall")
 
@@ -14,7 +14,8 @@ include_directories(${PROJECT_SOURCE_DIR}/include
                     ${PROJECT_SOURCE_DIR}/transport/ox-fabrics
                     ${PROJECT_SOURCE_DIR}/ftl/lnvm
                     ${PROJECT_SOURCE_DIR}/ftl/ox-app
-                    ${PROJECT_SOURCE_DIR}/mmgr/volt)
+                    ${PROJECT_SOURCE_DIR}/mmgr/volt
+                    ${PROJECT_SOURCE_DIR}/mmgr/file-be)
 
 install(FILES "${PROJECT_SOURCE_DIR}/host/nvme-host.h"
 	      "${PROJECT_SOURCE_DIR}/host/nvme-host-dev.h"
@@ -71,6 +72,11 @@ set(SRC_MMGR_VOLT ${PROJECT_SOURCE_DIR}/mmgr/volt/volt.c)
 add_library ( ox-mmgr-volt STATIC ${SRC_MMGR_VOLT} )
 target_link_libraries ( ox-mmgr-volt ox )
 install(TARGETS ox-mmgr-volt DESTINATION lib COMPONENT lib)
+
+set(SRC_MMGR_FILEBE ${PROJECT_SOURCE_DIR}/mmgr/file-be/file-be.c)
+add_library ( ox-mmgr-filebe STATIC ${SRC_MMGR_FILEBE} )
+target_link_libraries ( ox-mmgr-filebe ox )
+install(TARGETS ox-mmgr-filebe DESTINATION lib COMPONENT lib)
 
 # UNCOMMENT FOR OPEN-CHANNEL SSD V1.2 SUPPORT (first, install liblightnvm v0.1.2)
 #set(SRC_MMGR_OCSSD_1_2 ${PROJECT_SOURCE_DIR}/mmgr/ocssd-1.2/ocssd-1_2.c)
@@ -153,10 +159,11 @@ install(TARGETS ox-transport-fabrics-tgt DESTINATION lib COMPONENT lib)
 
 # OX Controller Targets
 
+ # Volatile Media Manager
 if (VOLT_GB)
-add_definitions (-DCONFIG_VOLT_GB=${VOLT_GB})
+    add_definitions (-DCONFIG_VOLT_GB=${VOLT_GB})
 else()
-add_definitions (-DCONFIG_VOLT_GB=4)
+    add_definitions (-DCONFIG_VOLT_GB=4)
 endif()
 
 set(OX_NVME_VOLT ${PROJECT_SOURCE_DIR}/targets/ox-ctrl-nvme-volt.c )
@@ -167,6 +174,28 @@ target_link_libraries ( ox-ctrl-nvme-volt ox-ftl-lnvm )
 target_link_libraries ( ox-ctrl-nvme-volt ox-ftl-block )
 target_link_libraries ( ox-ctrl-nvme-volt ox-parser-spec )
 target_link_libraries ( ox-ctrl-nvme-volt ox-transport-fabrics-tgt )
+
+ # File Backed Media Manager
+if (FILE_GB)
+    add_definitions (-DCONFIG_FILE_GB=${FILE_GB})
+else()
+    add_definitions (-DCONFIG_FILE_GB=4)
+endif()
+
+if (FILE_FOLDER)
+    add_definitions (-DCONFIG_FILE_FOLDER="${FILE_FOLDER}")
+else()
+    add_definitions (-DCONFIG_FILE_FOLDER=".")
+endif()
+
+set(OX_NVME_FILEBE ${PROJECT_SOURCE_DIR}/targets/ox-ctrl-nvme-filebe.c )
+add_executable ( ox-ctrl-nvme-filebe ${OX_NVME_FILEBE} )
+target_link_libraries ( ox-ctrl-nvme-filebe ox )
+target_link_libraries ( ox-ctrl-nvme-filebe ox-mmgr-filebe)
+target_link_libraries ( ox-ctrl-nvme-filebe ox-ftl-lnvm )
+target_link_libraries ( ox-ctrl-nvme-filebe ox-ftl-block )
+target_link_libraries ( ox-ctrl-nvme-filebe ox-parser-spec )
+target_link_libraries ( ox-ctrl-nvme-filebe ox-transport-fabrics-tgt )
 
 #UNCOMMENT FOR OPEN-CHANNEL SSD V1.2 SUPPORT (first, install liblightnvm v0.1.2)
 #set(OX_NVME_OCSSD ${PROJECT_SOURCE_DIR}/targets/ox-ctrl-nvme-ocssd.c )
