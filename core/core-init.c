@@ -99,7 +99,7 @@ static void nvm_calc_print_geo (struct nvm_mmgr_geometry *g)
     g->sec_size = g->pg_size / g->sec_per_pg;
     g->pl_pg_size = g->pg_size * (uint32_t) g->n_of_planes;
     g->blk_size = g->pl_pg_size * (uint32_t) g->pg_per_blk;
-    g->lun_size = g->blk_size * (uint32_t) g->blk_per_lun;
+    g->lun_size = g->blk_size * (uint64_t) g->blk_per_lun;
     g->ch_size = g->lun_size * (uint64_t) g->lun_per_ch;
     g->tot_size = g->ch_size * (uint64_t) g->n_of_ch;
     g->pg_oob_sz = g->sec_oob_sz * g->sec_per_pg;
