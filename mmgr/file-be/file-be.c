@@ -1061,7 +1061,7 @@ static int fbe_init(void)
         goto ZEROS;
     }
 
-    sprintf(fbe_mq.name, "%s", "FILE-BE_MMGR");
+    sprintf(fbe_mq.name, "%s", "FB-MMGR");
     fbe->mq = ox_mq_init(&fbe_mq);
     if (!fbe->mq) {
         fbe_clean_mem();
