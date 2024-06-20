@@ -362,6 +362,10 @@ static void *ox_mq_sq_thread (void *arg)
     pthread_t current_thread;
     cpu_set_t cpuset;
     uint16_t cpu_i;
+    char name[128] = "";
+
+    sprintf(name, "-SQ-%s-%d", q->mq->config->name, q->qid);
+    pthread_setname_np(pthread_self(), name);
 
     if (q->mq->config->flags & OX_MQ_CPU_AFFINITY) {
         if (!q->mq->config->sq_affinity[q->qid])
@@ -436,6 +440,10 @@ static void *ox_mq_cq_thread (void *arg)
     pthread_t current_thread;
     cpu_set_t cpuset;
     uint16_t cpu_i;
+    char name[128] = "";
+
+    sprintf(name, "-CQ-%s-%d", q->mq->config->name, q->qid);
+    pthread_setname_np(pthread_self(), name);
 
     if (q->mq->config->flags & OX_MQ_CPU_AFFINITY) {
         if (!q->mq->config->cq_affinity[q->qid])
