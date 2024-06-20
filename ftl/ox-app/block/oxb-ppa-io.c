@@ -102,18 +102,19 @@ static int ppa_io_check_end (struct nvm_io_cmd *cmd)
             }
         }
     }
-    goto RETURN;
+    return 0;
 
 SUBMIT:
     pthread_mutex_unlock (&cmd->mutex);
     ppa_io_submit (cmd);
-    goto RETURN;
+    return 0;;
 
 COMPLETE:
     pthread_mutex_unlock (&cmd->mutex);
     cmd->callback.cb_fn (cmd->callback.opaque);
-
+    return 0;
 RETURN:
+    pthread_mutex_unlock (&cmd->mutex);
     return 0;
 }
 
