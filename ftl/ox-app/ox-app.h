@@ -75,6 +75,7 @@ enum {
 #define APP_DEBUG_GL_MAP     0
 #define APP_DEBUG_LBA_IO     0
 #define APP_DEBUG_LOG        0
+#define APP_DEBUG_LOG_FLUSH  0
 #define APP_DEBUG_GC         0
 #define APP_DEBUG_RECOVERY   0
 
