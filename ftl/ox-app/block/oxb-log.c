@@ -167,12 +167,14 @@ static int appftl_log_append (struct app_log_entry *list, uint16_t size)
         memcpy (&lc->append_ptr->log, &list[lid], sizeof(struct app_log_entry));
         lc->append_ptr = lnext;
 
-    //    printf (" LOG (%d). ti: %lu, ts: %lu. LBA: %lu, PPA: %lu\n", list[lid].type, list[lid].write.tid, list[lid].ts,
-    //            list[lid].write.lba, list[lid].write.new_ppa);
-
         pthread_spin_unlock (&lc->append_spin);
 
         lid++;
+
+	if (APP_DEBUG_LOG)
+	    printf (" LOG APPEND (%d) ti: %lu, ts: %lu. LBA: %lu, PPA: %lu\n",
+		    list[lid].type, list[lid].write.tid, list[lid].ts,
+		    list[lid].write.lba, list[lid].write.new_ppa);
     }
 
     pthread_mutex_unlock (&lc->log_mutex);
@@ -249,7 +251,6 @@ RETRY:
             retries++;
             goto RETRY;
         }
-
         appftl_log_free_ppa (wppa, 0);
         return -1;
     }
@@ -483,6 +484,9 @@ static int appftl_log_flush_buffer (uint16_t size,
     truncate = lc->append_ptr;
     pthread_spin_unlock (&lc->append_spin);
 
+    if (APP_DEBUG_LOG_FLUSH)
+	printf ("FLUSHING LOGS... %d", flushed);
+
     while ((lc->flush_ptr != truncate) && (flushed < size)) {
 
         /* If it is not a shutdown, get the physical address */
@@ -533,6 +537,7 @@ static int appftl_log_flush_buffer (uint16_t size,
         lc->flush_ptr = read_ptr;
         pthread_spin_unlock (&lc->append_spin);
 
+/*
         flushed_pg = ox_malloc (sizeof (struct app_log_flushed_pg),
                                                             OX_MEM_OXBLK_LOG);
         if (!flushed_pg)
@@ -545,11 +550,17 @@ static int appftl_log_flush_buffer (uint16_t size,
             else
                 log_err ("[log: Flushed page not added to flushed list]");
         }
+*/
 
         appftl_log_free_ppa (&wppa, 0);
 
         flushed += processed;
+
+	if (APP_DEBUG_LOG_FLUSH)
+	    printf (" %d", flushed);
     }
+    if (APP_DEBUG_LOG_FLUSH)
+	printf (" - DONE\n");
 
     if (pad->count)
         ox_free (pad->rsv, OX_MEM_OXBLK_LOG);
