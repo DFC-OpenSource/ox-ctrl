@@ -409,12 +409,13 @@ static int fbe_erase_file (struct nvm_ppa_addr ppa)
     char file_name[256];
     uint32_t blk_size;
     uint64_t offset;
-    struct nvm_mmgr_geometry *geo = fbe_mmgr.geometry;
     FileBEBlock *fbe_blk;
+    struct nvm_mmgr_geometry *geo = fbe_mmgr.geometry;
 
-    blk_size = (geo->pg_size + (geo->sec_per_pg * geo->sec_oob_sz)) * geo->pg_per_blk;
+    blk_size = (geo->pg_size + (geo->sec_per_pg * geo->sec_oob_sz)) *
+		geo->pg_per_blk;
+
     sprintf(file_name, "%s_%d_%d", fbe_disk, ppa.g.ch, ppa.g.lun);
-
     file = open(file_name, O_WRONLY|O_SYNC, 0666);
 
     fbe_blk = fbe_get_block (ppa);
@@ -433,9 +434,10 @@ static int fbe_rw_file (struct nvm_ppa_addr ppa, void *buf, uint8_t dir)
 {
     int file;
     char file_name[256];
-    uint32_t blk_size, offset, pg_size;
-    struct nvm_mmgr_geometry *geo = fbe_mmgr.geometry;
+    uint32_t blk_size, pg_size;
+    uint64_t offset;
     FileBEBlock *fbe_blk;
+    struct nvm_mmgr_geometry *geo = fbe_mmgr.geometry;
 
     pg_size = geo->pg_size + (geo->sec_per_pg * geo->sec_oob_sz);
     blk_size = pg_size * geo->pg_per_blk;
@@ -449,7 +451,12 @@ static int fbe_rw_file (struct nvm_ppa_addr ppa, void *buf, uint8_t dir)
 
     offset = fbe_blk->file_offset + (blk_size * ppa.g.pl);
     offset += ppa.g.pg * pg_size;
-    //printf("blk_size: %d, pg_size: %d, blk: %d, pg: %d, pl: %d, file_id: %d, offset: %d, file_offset:%d\n", blk_size, pg_size, ppa.g.blk, ppa.g.pg, ppa.g.pl, fbe_blk->file_id, offset, fbe_blk->file_offset);
+
+    if (core.debug)
+	printf("[FILE-BE: file_id: %d, file_off: %lu, off: %lu,"
+	       "blk: %d, pg: %d, pl: %d, dir: %d]\n",
+	       fbe_blk->file_id, fbe_blk->file_offset, offset,
+	       ppa.g.blk, ppa.g.pg, ppa.g.pl, dir);
 
     switch (dir) {
 	case FILE_DMA_READ:
@@ -494,14 +501,14 @@ static int fbe_update_md_file (struct nvm_ppa_addr ppa) {
     int file;
     char file_name[256];
     FileBEBlock *blk;
-    
-    sprintf(file_name, "%s_%d_%d_md", fbe_disk, ppa.g.ch, ppa.g.lun);
 
     blk = fbe_get_block (ppa);
 
+    sprintf(file_name, "%s_%d_%d_md", fbe_disk, ppa.g.ch, ppa.g.lun);
     file = open(file_name, O_WRONLY|O_SYNC, 0666);
 
-    if (pwrite (file, &blk->file_id, sizeof(uint32_t), ppa.g.blk * sizeof(uint32_t)) < 0) {
+    if (pwrite (file, &blk->file_id, sizeof(uint32_t),
+					ppa.g.blk * sizeof(uint32_t)) < 0) {
 	close (file);
 	return -1;
     }
@@ -516,8 +523,8 @@ static int fbe_process_io (struct nvm_mmgr_io_cmd *cmd)
     struct fbe_dma *dma = (struct fbe_dma *) cmd->rsvd;
     struct nvm_mmgr_geometry *geo = fbe_mmgr.geometry;
     struct nvm_ppa_addr ppa;
-    int blk_i, pl_i, count = 0;
-    uint32_t pg_size, blk_size;
+    uint32_t blk_i, pl_i, pg_size;
+    uint64_t blk_size, count = 0;
 
     blk = fbe_get_block(cmd->ppa);
 
@@ -564,6 +571,7 @@ static int fbe_process_io (struct nvm_mmgr_io_cmd *cmd)
 		
 		    fbe_blk->file_id = count;
 		    fbe_blk->file_offset = blk_size * (count - 1);
+
 		}
 
 		/* Flush file MD */
@@ -846,11 +854,12 @@ static int fbe_disk_md_load (int file_md, uint32_t ch, uint32_t lun)
     struct nvm_mmgr_geometry *geo = fbe_mmgr.geometry;
     struct nvm_ppa_addr ppa;
     FileBEBlock *fbe_blk;
-    uint32_t nblks = geo->blk_per_lun;
-    uint32_t blk_list[nblks];
-    uint32_t blk_i, pl_i, pg_size, blk_size, tot_size, count = 0;
     char file_name[256] = "";
     int file;
+    uint64_t tot_size;
+    uint32_t nblks = geo->blk_per_lun;
+    uint32_t blk_list[nblks];
+    uint32_t blk_i, pl_i, pg_size, blk_size, count = 0;
 
     pg_size = geo->pg_size + (geo->sec_per_pg * geo->sec_oob_sz);
     blk_size = pg_size * geo->pg_per_blk * geo->n_of_planes;
@@ -861,14 +870,10 @@ static int fbe_disk_md_load (int file_md, uint32_t ch, uint32_t lun)
     /* Check and fix files if needed */
     sprintf(file_name, "%s_%d_%d", fbe_disk, ch, lun);
 
-    printf ("\nch: %d, lun: %d\n", ch, lun);
     for (blk_i = 0; blk_i < geo->blk_per_lun; blk_i++) {
 	
 	if (blk_list[blk_i])
 	    count++;
-
-	if(blk_list[blk_i])
-	    printf("  blk: %d/%d\n", blk_i, blk_list[blk_i]);
 
 	ppa.g.ch = ch;
 	ppa.g.lun = lun;
@@ -877,13 +882,10 @@ static int fbe_disk_md_load (int file_md, uint32_t ch, uint32_t lun)
 	    ppa.g.pl = pl_i;
 	    fbe_blk = fbe_get_block (ppa);
 	    fbe_blk->file_id = blk_list[blk_i];
-	    fbe_blk->file_offset = (uint64_t)blk_size * (uint64_t)(blk_list[blk_i] - 1);
-
-	    if(blk_list[blk_i])
-		printf ("    blk: %d - file_id: %d, file_off: %lu\n", fbe_blk->id, fbe_blk->file_id, fbe_blk->file_offset);
+	    fbe_blk->file_offset = (uint64_t)blk_size *
+					    (uint64_t)(blk_list[blk_i] - 1);
 	}
     }
-    printf ("used: %d, total: %d\n", count, geo->blk_per_lun);
     
     if (!count) {
 	remove (file_name);
@@ -904,10 +906,8 @@ static int fbe_init_disk (void)
 {
     struct nvm_mmgr_geometry *geo = fbe_mmgr.geometry;
     int file;
-    int ch, lun, blk;
+    int ch, lun;
     char file_name[256] = "";
-    FileBEBlock *fbe_blk;
-    struct nvm_ppa_addr ppa;
 
 #ifdef CONFIG_FILE_FOLDER
     strcpy(file_name, fbe_disk);
