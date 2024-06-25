@@ -13,16 +13,19 @@
 #define NVME_TEST_LBA_BUF       (NVME_TEST_BUF_SIZE / NVMEH_BLK_SZ)
 
 /* I/O write size */
-#define NVME_TEST_IO_SZ         (1024 * 32) /* 32 KB */
+#define NVME_TEST_IO_SZ         (1024 * 256) /* 256 KB */
 #define NVME_TEST_LBA_IO        (NVME_TEST_IO_SZ / NVMEH_BLK_SZ)
 
 /* Number of I/Os */
-#define NVME_TEST_IOS           1000
+#define NVME_TEST_IOS           4000
 
 /* Offsets containing the LBA for read check */
 #define CHECK_OFFSET1           16
 #define CHECK_OFFSET2           1852
 #define CHECK_OFFSET3           3740
+#define CHECK_OFFSET_LBA1	458
+#define CHECK_OFFSET_LBA2	2008
+#define CHECK_OFFSET_LBA3	3478
 
 /* Used to keep track of completed LBAs */
 static volatile uint64_t   done, corr;
@@ -65,7 +68,8 @@ static void nvme_test_callback (void *ctx, uint16_t status)
 {
     struct nvme_test_context *my_ctx = (struct nvme_test_context *) ctx;
     uint32_t *check1, *check2, *check3, lba, check;
-    uint8_t *buf;
+    uint64_t *checklba1, *checklba2, *checklba3, checklba, slba;
+    uint8_t *buf, fail;
 
     if (status)
         printf ("I/O %d failed.\n", my_ctx->id);
@@ -76,18 +80,39 @@ static void nvme_test_callback (void *ctx, uint16_t status)
         err++;
     pthread_spin_unlock (&done_spin);
 
-    if (done % NVME_TEST_LBA_IO * 400 == 0)
+    if (done % (NVME_TEST_LBA_IO * 50) == 0)
         nvme_test_print_runtime ();
 
+    slba = my_ctx->slba;
     for (lba = 0; lba < my_ctx->nlb; lba++) {
         buf = &my_ctx->buf[NVMEH_BLK_SZ * lba];
-        check1 = (uint32_t *) &buf[CHECK_OFFSET1];
+
+	/* Check the relative LBA offsets */
+	check1 = (uint32_t *) &buf[CHECK_OFFSET1];
         check2 = (uint32_t *) &buf[CHECK_OFFSET2];
         check3 = (uint32_t *) &buf[CHECK_OFFSET3];
-        check = (my_ctx->slba + lba) % NVME_TEST_LBA_BUF;
+        check = ((uint32_t) slba + lba) % NVME_TEST_LBA_BUF;
         if (!check) check = NVME_TEST_LBA_BUF;
-        if (*check1 != check || *check2 != check || *check3 != check)
-            corr++;
+
+	/* Check the absolute lba offsets */
+	checklba1 = (uint64_t *) &buf[CHECK_OFFSET_LBA1];
+	checklba2 = (uint64_t *) &buf[CHECK_OFFSET_LBA2];
+	checklba3 = (uint64_t *) &buf[CHECK_OFFSET_LBA3];
+	checklba = slba + (uint64_t) lba;
+
+	fail = 0;
+        if (*check1 != check || *check2 != check || *check3 != check ||
+	    *checklba1 != checklba || *checklba2 != checklba ||
+	    *checklba3 != checklba) {
+		corr++;
+		fail++;
+	}
+
+	if (fail)
+	    printf ("\nDATA CORRUPTION -> LBA: %lu, read LBA: %lu/%lu/%lu\n"
+		      "                   check: %d, read %d/%d/%d\n",
+		      checklba, *checklba1, *checklba2, *checklba3,
+		      check, *check1, *check2, *check3);
     }
     free (my_ctx->buf);
           
@@ -229,7 +254,7 @@ int main (int argc, char **argv)
 #endif
 
     /* Create the NVMe queues. One additional queue for the admin queue */
-    for (q_id = 0; q_id < NVME_TEST_NUM_QUEUES + 1; q_id++) {
+    for (q_id = 0; q_id < NVME_TEST_NUM_QUEUES; q_id++) {
         if (nvme_host_create_queue (q_id)) {
             printf ("Failed to creating queue %d.\n", q_id);
             goto EXIT;
