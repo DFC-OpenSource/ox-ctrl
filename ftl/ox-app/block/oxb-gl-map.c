@@ -808,7 +808,7 @@ static uint64_t map_read (uint64_t lba)
     if (!cache_ent)
         return AND64;
 
-    pthread_spin_lock (cache_ent->spin);
+//  pthread_spin_lock (cache_ent->spin);
     map_ent = &((struct app_map_entry *) cache_ent->buf)[ent_off];
 
     if (map_ent->lba != lba) {
@@ -817,11 +817,11 @@ static uint64_t map_read (uint64_t lba)
             "map lba: %lu, map ppa: (%d/%d/%d/%d/%d/%d), ent_off %d\n",
                 lba, map_ent->lba, ppa.g.ch, ppa.g.lun, ppa.g.blk, ppa.g.pl,
                 ppa.g.pg, ppa.g.sec, ent_off);
-	pthread_spin_unlock (cache_ent->spin);
+//	pthread_spin_unlock (cache_ent->spin);
         return -1;
     }
     ret = map_ent->ppa;
-    pthread_spin_unlock (cache_ent->spin);
+//  pthread_spin_unlock (cache_ent->spin);
 
     return ret;
 }
