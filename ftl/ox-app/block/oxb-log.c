@@ -32,7 +32,7 @@
 #define APP_LOG_BUF_SZ      4096    /* Buffer entries */
 #define APP_LOG_TRUNC_SZ    511     /* Standard flush size (1 flash page) */
 #define APP_LOG_ASYNCH_TO   1000000
-#define APP_LOG_MQ_SZ       512
+#define APP_LOG_MQ_SZ       2048
 
 #define APP_LOG_ASYNCH  0
 #define APP_LOG_SYNCH   1
