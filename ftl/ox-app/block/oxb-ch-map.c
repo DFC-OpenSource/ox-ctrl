@@ -97,7 +97,8 @@ static int oxb_ch_map_load (struct app_channel *lch)
             }
 
             ent_left = (ent_i < n_cp_entries - 1) ?
-                                md->ent_per_pg : md->entries % md->ent_per_pg;
+                        md->ent_per_pg : (md->entries % md->ent_per_pg == 0) ?
+			md->ent_per_pg :  md->entries % md->ent_per_pg;
 
             if (ftl_nvm_seq_transfer (io, &tiny[ent_i].ppa, md_ents, 1,
                                 md->ent_per_pg, ent_left, md->entry_sz,
@@ -180,7 +181,8 @@ static int oxb_ch_map_nvm_write (struct app_channel *lch,
     }
 
     ent_left = ((index % md->tiny.entries) < md->tiny.entries - 1) ?
-                                md->ent_per_pg : md->entries % md->ent_per_pg;
+                        md->ent_per_pg : (md->entries % md->ent_per_pg == 0) ?
+			md->ent_per_pg :  md->entries % md->ent_per_pg;
 
     ret = ftl_nvm_seq_transfer (io, addr, buf, 1, md->ent_per_pg,
                             ent_left, md->entry_sz,
@@ -238,7 +240,7 @@ static int oxb_ch_map_flush (struct app_channel *lch)
         md_ents = md->tbl + (md->entry_sz * md->entries) +
                                         (ent_i * md->entry_sz * md->ent_per_pg);
 
-        /* Only flush dirty pages */
+	/* Only flush dirty pages */
         if (md->tiny.dirty[ent_i]) {
 
 RETRY:
