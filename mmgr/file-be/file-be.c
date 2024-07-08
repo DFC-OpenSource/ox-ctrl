@@ -856,10 +856,10 @@ static int fbe_disk_md_load (int file_md, uint32_t ch, uint32_t lun)
     FileBEBlock *fbe_blk;
     char file_name[256] = "";
     int file;
-    uint64_t tot_size;
+    uint64_t tot_size, blk_size;
     uint32_t nblks = geo->blk_per_lun;
     uint32_t blk_list[nblks];
-    uint32_t blk_i, pl_i, pg_size, blk_size, count = 0;
+    uint32_t blk_i, pl_i, pg_size, count = 0;
 
     pg_size = geo->pg_size + (geo->sec_per_pg * geo->sec_oob_sz);
     blk_size = pg_size * geo->pg_per_blk * geo->n_of_planes;
@@ -882,20 +882,19 @@ static int fbe_disk_md_load (int file_md, uint32_t ch, uint32_t lun)
 	    ppa.g.pl = pl_i;
 	    fbe_blk = fbe_get_block (ppa);
 	    fbe_blk->file_id = blk_list[blk_i];
-	    fbe_blk->file_offset = (uint64_t)blk_size *
-					    (uint64_t)(blk_list[blk_i] - 1);
+	    fbe_blk->file_offset = blk_size * (uint64_t)(blk_list[blk_i] - 1);
 	}
     }
     
     if (!count) {
 	remove (file_name);
     } else {
-	tot_size = blk_size * count;
+	tot_size = blk_size * (uint64_t) count;
 	file = open(file_name, O_WRONLY|O_SYNC, 0666);
-	//if (ftruncate(file, tot_size) < 0) {
-	//    close (file);
-	//    return -1;
-	//}
+	if (ftruncate(file, tot_size) < 0) {
+	    close (file);
+	    return -1;
+	}
 	close(file);
     }
     
