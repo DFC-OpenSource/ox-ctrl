@@ -494,6 +494,14 @@ enum {
     NVME_RW_PRINFO_PRCHK_REF    = 1 << 10,
 };
 
+enum NvmeIdentifyCNS {
+    NVME_CNS_NS		= 0x00,
+    NVME_CNS_CTRL	= 0x01,
+    NVME_CNS_NS_LIST	= 0x02,
+    NVME_CNS_NS_DESC	= 0x03,
+    NVME_CNS_NVM_SET	= 0x04,
+};
+
 enum NvmeIoCommands {
     NVME_CMD_FLUSH              = 0x00,
     NVME_CMD_WRITE              = 0x01,
@@ -563,12 +571,19 @@ typedef struct NvmeCmd {
 
 typedef struct NvmeIdentify {
     uint8_t     opcode;
-    uint8_t     flags;
+    uint8_t     fuse : 2;
+    uint8_t     rsvd : 4;
+    uint8_t     psdt : 2;
     uint16_t    cid;
     uint32_t    nsid;
     uint64_t    rsvd2[2];
-    uint64_t    prp1;
-    uint64_t    prp2;
+    union {
+        NvmeSGLDesc     sgl;
+        struct {
+            uint64_t    prp1;
+            uint64_t    prp2;
+	};
+    };
     uint8_t     cns;
     uint8_t     rsv15;
     uint16_t    cntid;

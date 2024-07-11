@@ -51,23 +51,45 @@ struct nvmeh_ctx {
 };
 
 struct nvme_cmd_rw {
-    uint8_t     opcode;
+    uint8_t     opcode;		/* Dword  0 	*/
     uint8_t     fuse : 2;
     uint8_t     rsvd : 4;
     uint8_t     psdt : 2;
     uint16_t    cid;
-    uint32_t    nsid;
-    uint64_t    rsvd2;
-    uint64_t    mptr;
-    uint64_t    prp1;
-    uint64_t    prp2;
-    uint64_t    slba;
-    uint16_t    nlb;
+    uint32_t    nsid;		/* Dword  1 	*/
+    uint64_t    rsvd2;		/* Dword  2,  3	*/
+    uint64_t    mptr;		/* Dword  4,  5	*/
+    uint64_t    prp1;		/* Dword  6,  7	*/
+    uint64_t    prp2;		/* Dword  8,  9	*/
+    uint64_t    slba;		/* Dword 10, 11	*/
+    uint16_t    nlb;		/* Dword 12 	*/
     uint16_t    control;
-    uint32_t    dsmgmt;
-    uint32_t    reftag;
-    uint16_t    apptag;
+    uint32_t    dsmgmt;		/* Dword 13 	*/
+    uint32_t    reftag;		/* Dword 14	*/
+    uint16_t    apptag;		/* Dword 15	*/
     uint16_t    appmask;
+};
+
+struct nvme_cmd_identify {
+    uint8_t     opcode;		/* Dword  0 	*/
+    uint8_t     fuse : 2;
+    uint8_t     rsvd : 4;
+    uint8_t     psdt : 2;
+    uint16_t    cid;
+    uint32_t    nsid;		/* Dword  1 	*/
+    uint64_t    rsvd2;		/* Dword  2,  3	*/
+    uint64_t    mptr;		/* Dword  4,  5	*/
+    uint64_t    prp1;		/* Dword  6,  7	*/
+    uint64_t    prp2;		/* Dword  8,  9	*/
+    uint8_t	cns;		/* Dword 10	*/
+    uint8_t	rsvd3;
+    uint16_t	cntid;
+    uint16_t	nvmsetid;	/* Dword 11	*/
+    uint16_t	rsvd4;
+    uint32_t    rsvd5;		/* Dword 12 	*/
+    uint32_t    rsvd6;		/* Dword 13 	*/
+    uint32_t    uuid;		/* Dword 14	*/
+    uint32_t    rsvd8;		/* Dword 15	*/
 };
 
 struct nvme_host {

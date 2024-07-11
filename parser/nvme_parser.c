@@ -27,7 +27,7 @@
 #include <nvmef.h>
 #include <ox-app.h>
 
-#define PARSER_NVME_COUNT   4
+#define PARSER_NVME_COUNT   5
 
 extern struct core_struct core;
 
@@ -220,6 +220,41 @@ static int parser_nvme_null (NvmeRequest *req, NvmeCmd *cmd)
     return NVME_SUCCESS;
 }
 
+static int parser_nvme_identify (NvmeRequest *req, NvmeCmd *cmd)
+{
+    NvmeIdentify *id_cmd = (NvmeIdentify *) cmd;
+    uint64_t prp[1];
+    uint64_t keys[16];
+    void *data;
+
+    /* Map PRPs and SGL addresses */
+    switch (id_cmd->psdt) {
+        case CMD_PSDT_PRP:
+        case CMD_PSDT_RSV:
+            prp[0] = id_cmd->prp1;
+            break;
+        case CMD_PSDT_SGL:
+        case CMD_PSDT_SGL_MD:
+            if (nvmef_sgl_to_prp (1, &id_cmd->sgl, prp, keys))
+                return NVME_INVALID_FIELD;
+            break;
+        default:
+            return NVME_INVALID_FORMAT;
+    }
+
+    switch (id_cmd->cns) {
+	case NVME_CNS_CTRL:
+	    data = (void *)(&core.nvme_ctrl->id_ctrl);
+	    break;
+	case NVME_CNS_NS:
+	    data = (void *)(&core.nvme_ctrl->namespaces[0].id_ns);
+    }
+
+    ox_dma (data, prp[0], sizeof (NvmeIdCtrl), NVM_DMA_TO_HOST);
+
+    return NVME_SUCCESS;
+}
+
 static struct nvm_parser_cmd nvme_cmds[PARSER_NVME_COUNT] = {
     {
         .name       = "NVME_WRITE",
@@ -244,12 +279,18 @@ static struct nvm_parser_cmd nvme_cmds[PARSER_NVME_COUNT] = {
         .opcode     = NVME_CMD_READ_NULL,
         .opcode_fn  = parser_nvme_null,
         .queue_type = NVM_CMD_IO
+    },
+    {
+	.name	    = "NVME_ADM_IDENTIFY",
+	.opcode	    = NVME_ADM_CMD_IDENTIFY,
+	.opcode_fn  = parser_nvme_identify,
+	.queue_type = NVM_CMD_ADMIN
     }
 };
 
 static void parser_nvme_exit (struct nvm_parser *parser)
 {
-
+    return;
 }
 
 static struct nvm_parser parser_nvme = {
