@@ -9,6 +9,8 @@
 #define NVMEH_NUM_QUEUES 4
 #define NVMEH_BLKSZ 	 4096
 
+#define OX_FUSE_WRITE_BACK 1
+
 /* This is an example context that identifies the completion */
 struct nvme_context {
     uint32_t id;
@@ -16,6 +18,8 @@ struct nvme_context {
     uint64_t nlb;
     uint16_t done;
     uint16_t status;
+    uint16_t is_write;
+    uint8_t *buf;
     TAILQ_ENTRY (nvme_context) entry;
 };
 
@@ -30,9 +34,22 @@ static pthread_spinlock_t ctx_spin;
 static void nvme_callback (void *c, uint16_t status)
 {
     struct nvme_context *my_ctx = (struct nvme_context *) c;
+    uint8_t freem = 0;
+
+    if (OX_FUSE_WRITE_BACK && my_ctx->is_write)
+	freem = 1;
 
     my_ctx->status = status;
     my_ctx->done = 1;
+
+    if (freem) {
+	free (my_ctx->buf);
+
+	pthread_spin_lock (&ctx_spin);
+	TAILQ_REMOVE(&ctx_u, my_ctx, entry);
+	TAILQ_INSERT_TAIL(&ctx_f, my_ctx, entry);
+	pthread_spin_unlock (&ctx_spin);
+    }
 }
 
 int fuse_ox_read (uint64_t slba, uint64_t size, uint8_t *buf) {
@@ -64,6 +81,7 @@ RETRY:
     c->nlb = size / 4096;
     c->done = 0;
     c->status = 0;
+    c->is_write = 0;
     
     /* Submit the read to OX */
     ret = nvmeh_read (buf, size, slba, nvme_callback, c);
@@ -91,7 +109,8 @@ RETRY:
 int fuse_ox_write (uint64_t slba, uint64_t size, uint8_t *buf) {
     struct nvme_context *c;
     uint16_t retry = 2000;
-    int ret;
+    int ret, fail = 0;
+    uint8_t *rbuf;
 
 RETRY:
     /* Get the context */
@@ -117,27 +136,45 @@ RETRY:
     c->nlb = size / 4096;
     c->done = 0;
     c->status = 0;
+    c->is_write = 1;
+
+    if (OX_FUSE_WRITE_BACK) {
+	c->buf = malloc (size);
+	if (!c->buf) {
+	    fail = 1;
+	    rbuf = buf;
+	} else {
+	    memcpy (c->buf, buf, size);
+	    rbuf = c->buf;
+	}
+    } else {
+	rbuf = buf;
+    }
     
     /* Submit the read to OX */
-    ret = nvmeh_write (buf, size, slba, nvme_callback, c);
+    ret = nvmeh_write (rbuf, size, slba, nvme_callback, c);
     if (ret) {
 	printf ("Error: I/O not submitted.\n");
 	c->done = 1;
 	c->status = 1;
     }
 
-    /* Synchronously wait for completion */
-    while (!c->done)
-	usleep (1);
+    if (OX_FUSE_WRITE_BACK && !fail) {
+	ret = 0;
+    } else {
+	/* Synchronously wait for completion */
+	while (!c->done)
+	    usleep (1);
 
-    ret = c->status;
+	ret = c->status;
 
-   /* Free the context */ 
-    pthread_spin_lock (&ctx_spin);
-    TAILQ_REMOVE(&ctx_u, c, entry);
-    TAILQ_INSERT_TAIL(&ctx_f, c, entry);
-    pthread_spin_unlock (&ctx_spin);
-    
+	/* Free the context */
+	pthread_spin_lock (&ctx_spin);
+	TAILQ_REMOVE(&ctx_u, c, entry);
+	TAILQ_INSERT_TAIL(&ctx_f, c, entry);
+	pthread_spin_unlock (&ctx_spin);
+    }
+
     return ret;
 }
 
