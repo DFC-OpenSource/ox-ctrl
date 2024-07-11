@@ -238,3 +238,11 @@ target_link_libraries ( ox-test-nvme-thput-w ox-host-nvme )
 set(OX_TEST_NVME_THPUT_R ${PROJECT_SOURCE_DIR}/test/test-nvme-thput-r.c )
 add_executable ( ox-test-nvme-thput-r ${OX_TEST_NVME_THPUT_R} )
 target_link_libraries ( ox-test-nvme-thput-r ox-host-nvme )
+
+add_definitions (-D_FILE_OFFSET_BITS=64)
+set(OX_FUSE_BIGFILE
+    ${PROJECT_SOURCE_DIR}/fuse/fuse-bigfile.c
+    ${PROJECT_SOURCE_DIR}/fuse/fuse-ox-nvme.c )
+add_executable ( ox-fuse-bigfile ${OX_FUSE_BIGFILE} )
+target_link_libraries ( ox-fuse-bigfile fuse )
+target_link_libraries ( ox-fuse-bigfile ox-host-nvme )
