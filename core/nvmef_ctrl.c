@@ -275,8 +275,8 @@ static int nvmef_init_ctrl (NvmeCtrl *n)
 
     /* To be checked */
     memcpy (id->sn, "---OX-CONTROLLER---\0", 20);
-    memcpy (id->mn, "---------------DFC-CARD-OX-------------\0", 40);
-    memcpy (id->subnqn, "2016-09-ox.ctrl.dfc.nvme\0", 25);
+    memcpy (id->mn, "---------------OX-NVME-DEV-------------\0", 40);
+    memcpy (id->subnqn, "2024-07-ox.ctrl.nvme\0", 21);
     memcpy (id->fr, "180916\0", 7);
     id->cntlid = htole16(0xaaac);
 
