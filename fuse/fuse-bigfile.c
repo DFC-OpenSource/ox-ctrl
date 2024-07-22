@@ -29,11 +29,11 @@ static int do_getattr( const char *path, struct stat *st)
 		st->st_mode = S_IFDIR | 0755;
 		st->st_nlink = 2;
 	} else {
-		st->st_mode = S_IFREG | 0666;
+		st->st_mode = S_IFREG | 0664;
 		st->st_nlink = 1;
 		st->st_size = (off_t) ns_size * NVMEH_BLK_SZ;
 	}
-	
+
 	return 0;
 }
 
@@ -57,8 +57,12 @@ static int do_read( const char *path, char *buffer, size_t size, off_t offset,
     int ret;
 
     ret = fuse_ox_read ((offset / NVMEH_BLK_SZ) + 1, size, (uint8_t *) buffer);		
-
     return (!ret) ? size : 0;
+}
+
+static int do_opendir( const char *path, struct fuse_file_info *fi)
+{
+    return 0;
 }
 
 static int do_write( const char *path, const char *buffer, size_t size,
@@ -99,12 +103,19 @@ static int do_open( const char *path, struct fuse_file_info *fi)
     return 0;
 }
 
+static void *do_init( struct fuse_conn_info *conn)
+{
+    return NULL;
+}
+
 static struct fuse_operations operations = {
     .getattr	= do_getattr,
     .readdir	= do_readdir,
     .read	= do_read,
     .write	= do_write,
     .open	= do_open,
+    .opendir	= do_opendir,
+    .init	= do_init,
 };
 
 int main( int argc, char *argv[] )
