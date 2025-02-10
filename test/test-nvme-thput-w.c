@@ -13,16 +13,19 @@
 #define NVME_TEST_LBA_BUF       (NVME_TEST_BUF_SIZE / NVMEH_BLK_SZ)
 
 /* I/O write size */
-#define NVME_TEST_IO_SZ         (1024 * 32) /* 32 KB */
+#define NVME_TEST_IO_SZ         (1024 * 256) /* 256 KB */
 #define NVME_TEST_LBA_IO        (NVME_TEST_IO_SZ / NVMEH_BLK_SZ)
 
 /* Number of I/Os */
-#define NVME_TEST_IOS           1000
+#define NVME_TEST_IOS           4000
 
 /* Offsets containing the LBA for read check */
 #define CHECK_OFFSET1           16
 #define CHECK_OFFSET2           1852
 #define CHECK_OFFSET3           3740
+#define CHECK_OFFSET_LBA1	458
+#define CHECK_OFFSET_LBA2	2008
+#define CHECK_OFFSET_LBA3	3478
 
 /* Write buffer */
 static uint8_t            *write_buffer;
@@ -73,7 +76,7 @@ static void nvme_test_callback (void *ctx, uint16_t status)
         err++;
     pthread_spin_unlock (&done_spin);
 
-    if (done % NVME_TEST_LBA_IO * 400 == 0)
+    if (done % (NVME_TEST_LBA_IO * 25) == 0)
         nvme_test_print_runtime ();
           
     if (done == lastlba - firstlba + 1) {
@@ -124,14 +127,14 @@ static int nvme_test_prepare (void)
         return -1;
     }
 
-    while (off < NVME_TEST_BUF_SIZE + NVME_TEST_IO_SZ - 1) {
+    while (off < NVME_TEST_BUF_SIZE + NVME_TEST_IO_SZ) {
         buf = &write_buffer[off];
         memset (buf, (uint8_t) lba + 7, NVMEH_BLK_SZ);
         *((uint32_t *) &buf[CHECK_OFFSET1]) = lba;
         *((uint32_t *) &buf[CHECK_OFFSET2]) = lba;
         *((uint32_t *) &buf[CHECK_OFFSET3]) = lba;
         off += NVMEH_BLK_SZ;
-        lba = (lba == NVME_TEST_BUF_SIZE) ? 1 : lba + 1;
+        lba = (lba == NVME_TEST_LBA_BUF) ? 1 : lba + 1;
     }
 
     if (pthread_spin_init (&done_spin, 0)) {
@@ -141,6 +144,23 @@ static int nvme_test_prepare (void)
     }
 
     return 0;
+}
+
+static void nvme_set_lba_check (uint8_t *buf, uint64_t slba, uint64_t iosz)
+{
+    uint64_t lba, nlba;
+    uint8_t *bufoff;
+
+    lba = slba;
+    nlba = iosz / NVMEH_BLK_SZ;
+
+    for (int i = 0; i < nlba; i++) {
+	bufoff = &buf[i * NVMEH_BLK_SZ];
+        *((uint64_t *) &bufoff[CHECK_OFFSET_LBA1]) = lba;
+        *((uint64_t *) &bufoff[CHECK_OFFSET_LBA2]) = lba;
+        *((uint64_t *) &bufoff[CHECK_OFFSET_LBA3]) = lba;
+	lba++;
+    }
 }
 
 static void nvme_test_destroy (void)
@@ -169,6 +189,8 @@ void nvme_test_run (void)
         boff = ((slba - 1) % NVME_TEST_LBA_BUF) * NVMEH_BLK_SZ;
         iosz = (slba + lbaio > lastlba) ?
                                 ctx[it].nlb * NVMEH_BLK_SZ : NVME_TEST_IO_SZ;
+
+	nvme_set_lba_check (&write_buffer[boff], slba, iosz);
 
         /* Submit the write command with callback function */
         ret = nvmeh_write (&write_buffer[boff],
@@ -228,7 +250,7 @@ int main (int argc, char **argv)
 #endif
 
     /* Create the NVMe queues. One additional queue for the admin queue */
-    for (q_id = 0; q_id < NVME_TEST_NUM_QUEUES + 1; q_id++) {
+    for (q_id = 0; q_id < NVME_TEST_NUM_QUEUES; q_id++) {
         if (nvme_host_create_queue (q_id)) {
             printf ("Failed to creating queue %d.\n", q_id);
             goto EXIT;

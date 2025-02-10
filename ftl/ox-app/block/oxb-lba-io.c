@@ -34,7 +34,7 @@
 #define LBA_IO_LBA_ENTRIES  (LBA_IO_PPA_ENTRIES * LBA_IO_PPA_SIZE)
 #define LBA_IO_WRITE_Q      0
 #define LBA_IO_READ_Q       1
-#define LBA_IO_QUEUE_TO     4000000
+#define LBA_IO_QUEUE_TO     10000000
 #define LBA_IO_RETRY        40000
 #define LBA_IO_RETRY_DELAY  100
 
@@ -632,7 +632,6 @@ RETRY:
     pthread_spin_unlock (&cmd_spin);
 
     lba_io_reset_cmd (lcmd);
-
     ret = (!type) ? lba_io_write (lcmd) : lba_io_read (lcmd);
 
     if (ret)

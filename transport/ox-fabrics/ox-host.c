@@ -292,7 +292,20 @@ REQUEUE:
 
 int oxf_host_submit_admin (struct nvme_cmd *ncmd, oxf_callback_fn *cb, void *ctx)
 {
-    return oxf_host_submit_io (0, ncmd, NULL, 0, cb, ctx);
+    struct nvme_sgl_desc *desc;
+    uint8_t *buf[1];
+    uint32_t buf_sz;
+    int ret;
+
+    buf[0] = (uint8_t *) ncmd->prp1;
+    buf_sz = 4096;
+    desc = oxf_host_alloc_sgl (buf, &buf_sz, 1);
+
+    ret = oxf_host_submit_io (0, ncmd, desc, 1, cb, ctx);
+
+    oxf_host_free_sgl (desc);
+
+    return ret;
 }
 
 struct nvme_sgl_desc *oxf_host_alloc_sgl (uint8_t **buf_list, uint32_t *buf_sz,

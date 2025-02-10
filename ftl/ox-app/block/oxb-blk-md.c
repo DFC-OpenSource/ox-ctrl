@@ -295,14 +295,21 @@ static struct app_blk_md_entry *oxb_blk_md_get (struct app_channel *lch,
                                                                   uint16_t lun)
 {
     struct app_blk_md *md = lch->blk_md;
-    size_t lun_sz = md->entry_sz * lch->ch->geometry->blk_per_lun;
+    struct app_blk_md_entry *blk;
+    uint64_t lun_sz = md->entry_sz * lch->ch->geometry->blk_per_lun;
 
     if (!md->tbl)
         return NULL;
 
-    return (struct app_blk_md_entry *) (md->tbl + (lun * lun_sz));
+    blk = (struct app_blk_md_entry *) (md->tbl + ((uint64_t)lun * lun_sz));
+
+    return blk;
 }
 
+/* Marks a blk_md page as dirty, to be flushed to storage.
+ * Index: Index of the dirty blk_md page in the tiny dirty array
+ * 	  Generally, it is the sequenctial blk id within a channel
+ * 	  divided by the number of blk_md entries in a flash page */
 static void oxb_blk_md_mark (struct app_channel *lch, uint64_t index)
 {
     if (!lch->blk_md->tiny.dirty[index]) {
@@ -324,7 +331,7 @@ static void oxb_blk_md_invalidate (struct app_channel *lch,
     uint32_t blk_i;
     uint64_t index;
 
-    off = (1 << g->sec_per_pg) - 1;
+    off = (uint8_t)((1 << g->sec_per_pg) - 1);
     blk_i = (g->blk_per_lun * ppa->g.lun) + ppa->g.blk;
 
     lun = oxapp()->md->get_fn (lch, ppa->g.lun);
@@ -352,7 +359,7 @@ static void oxb_blk_md_invalidate (struct app_channel *lch,
 
     } else {
 
-        if (pg_map[ppa->g.pl] & 1 << ppa->g.sec) {
+        if (pg_map[ppa->g.pl] & (1 << ppa->g.sec)) {
             if (APP_DEBUG_BLK_MD)
                 printf ("[blk-md: Duplicated sector invalidation "
                         "(%d/%d/%d/%d/%d/%d)]\n", ppa->g.ch, ppa->g.lun,

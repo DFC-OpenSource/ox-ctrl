@@ -233,10 +233,13 @@ RETRY:
         }
         cache_ent->dirty = 0;
 
-        /* Find the TINY index from SMALL index */
-        evict_index = cache_ent->md_entry->lba /
-                                            ch[cache->id]->map_md->ent_per_pg;
-    
+        /* Find the TINY index within a channel from a SMALL index
+	 * md_entry lba is an index across all channels and we must get
+	 * the evict index related to the tiny table we want to mark */
+        evict_index =
+	    (cache_ent->md_entry->lba % ch[cache->id]->map_md->entries) /
+                                        ch[cache->id]->map_md->ent_per_pg;
+
         /* Mark SMALL entry as dirty */
         oxapp()->ch_map->mark_fn (ch[cache->id], evict_index);
 
@@ -430,8 +433,8 @@ static void map_flush_ch_cache (struct map_cache *cache, uint8_t full)
     cp_running = 1;
 
     /* make an immutable copy of SMALL table */
+    immut = md->tbl + (md->entry_sz * md->entries);
     for (ent_i = 0; ent_i < md->entries; ent_i++) {
-        immut = md->tbl + (md->entry_sz * md->entries);
         pthread_mutex_lock (&md->entry_mutex[ent_i]);
         memcpy (immut + (md->entry_sz * ent_i),
                                 md->tbl + (md->entry_sz * ent_i), md->entry_sz);
@@ -698,7 +701,9 @@ static int map_upsert_md (uint64_t index, uint64_t new_ppa, uint64_t old_ppa)
             ret = 1;
         else {
             /* Mark SMALL entry as dirty */
-            oxapp()->ch_map->mark_fn (ch[ch_map], pg_off);
+            oxapp()->ch_map->mark_fn (ch[ch_map],
+				(index % ch[ch_map]->map_md->entries) /
+				 ch[ch_map]->map_md->ent_per_pg);
             addr->addr = new_ppa;
         }
 
@@ -803,7 +808,7 @@ static uint64_t map_read (uint64_t lba)
     if (!cache_ent)
         return AND64;
 
-    pthread_spin_lock (cache_ent->spin);
+//  pthread_spin_lock (cache_ent->spin);
     map_ent = &((struct app_map_entry *) cache_ent->buf)[ent_off];
 
     if (map_ent->lba != lba) {
@@ -812,11 +817,11 @@ static uint64_t map_read (uint64_t lba)
             "map lba: %lu, map ppa: (%d/%d/%d/%d/%d/%d), ent_off %d\n",
                 lba, map_ent->lba, ppa.g.ch, ppa.g.lun, ppa.g.blk, ppa.g.pl,
                 ppa.g.pg, ppa.g.sec, ent_off);
-        pthread_spin_unlock (cache_ent->spin);
+//	pthread_spin_unlock (cache_ent->spin);
         return -1;
     }
     ret = map_ent->ppa;
-    pthread_spin_unlock (cache_ent->spin);
+//  pthread_spin_unlock (cache_ent->spin);
 
     return ret;
 }

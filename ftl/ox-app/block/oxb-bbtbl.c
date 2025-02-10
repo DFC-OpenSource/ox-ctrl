@@ -163,8 +163,8 @@ static int oxb_bbt_byte_flush (struct app_channel *lch)
     uint32_t pg_sz = ch->geometry->pg_size;
 
     if (bbt->bb_sz > pg_sz) {
-        log_err("[ox-blk ERR: Ch %d -> Maximum Bad block Table size: %d blocks\n",
-                                                            ch->ch_id, pg_sz);
+        log_err("[ox-blk ERR: Ch %d -> Maximum Bad block Table size: %d blocks. Current: %d\n",
+                                                            ch->ch_id, pg_sz, bbt->bb_sz);
         return -1;
     }
 
@@ -299,8 +299,8 @@ static int oxb_bbt_byte_load (struct app_channel *lch)
     uint32_t pg_sz = ch->geometry->pg_size;
 
     if (bbt->bb_sz > pg_sz) {
-        log_err("[ox-blk ERR: Ch %d -> Maximum Bad block Table size: %d blocks\n",
-                                                            ch->ch_id, pg_sz);
+        log_err("[ox-blk ERR: Ch %d -> Maximum Bad block Table size: %d blocks. Current: %d\n",
+                                                            ch->ch_id, pg_sz, bbt->bb_sz);
         return -1;
     }
 

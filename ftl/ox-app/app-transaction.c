@@ -77,7 +77,7 @@ RETRY:
     tr = TAILQ_FIRST(&free_tr_head);
     if (!tr) {
         pthread_spin_unlock (&tr_spin);
-	usleep (500);
+	usleep (5000);
 	log_info ("[ox-app (transaction): Transaction slot not available. "
                                                     "Retrying after 500 us.]");
 	goto RETRY;

@@ -181,6 +181,7 @@ enum OX_MEM_TYPES {
     OX_MEM_OXBLK_REC    = 20,
     OX_MEM_FABRICS      = 21,
     OX_MEM_NVMEF        = 22,
+    OX_MEM_MMGR_FILEBE	= 23,
     OX_MEM_ELEOS_W      = 29,
     OX_MEM_ELEOS_LBA    = 30,
     OX_MEM_APP_HMAP     = 31 /* 31-40 belong to HMAP instances */
@@ -769,6 +770,7 @@ int mmgr_dfcnand_init (void);
 int mmgr_ocssd_1_2_init (void);
 int mmgr_volt_init (void);
 int mmgr_volt_init_nodisk (void);
+int mmgr_filebe_init (void);
 int parser_nvme_init (void);
 int parser_lnvm_init (void);
 int parser_fabrics_init (void);

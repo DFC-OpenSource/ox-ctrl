@@ -26,6 +26,7 @@
 #include <ox-fabrics.h>
 #include <nvme.h>
 #include <nvme-host-dev.h>
+#include <nvme-host.h>
 
 static struct nvme_host nvmeh;
 
@@ -266,6 +267,64 @@ void nvmeh_exit_ctx_read (struct nvme_host *host)
 
     pthread_spin_destroy (&host->ctxr_spin);
     free (host->ctxr_ent);
+}
+
+void nvmeh_identify_cb (void *ctx, struct nvme_cqe *cqe) {
+    struct nvmeh_cmd_status *status = (struct nvmeh_cmd_status *) ctx;
+
+    status->status = cqe->status;
+    status->ctx->completed = 1;
+}
+
+int nvmeh_identify_ctrl (struct nvme_id_ctrl *buf) {
+    struct nvme_cmd_identify cmd;
+    struct nvmeh_ctx ctx;
+    struct nvmeh_cmd_status status;
+
+    ctx.completed = 0;
+    status.status = 0;
+    status.ctx = &ctx;
+
+    cmd.opcode = NVME_ADM_CMD_IDENTIFY;
+    cmd.prp1 = (uint64_t) buf;
+    cmd.cns = NVME_CNS_CTRL;
+
+    if (oxf_host_submit_admin ((struct nvme_cmd *) &cmd,
+					    nvmeh_identify_cb, &status)) {
+	return -1;
+    }
+
+    while (!ctx.completed) {
+	usleep (100);
+    }
+
+    return status.status;
+}
+
+int nvmeh_identify_ns (struct nvme_id_ns *buf, uint32_t nsid) {
+    struct nvme_cmd_identify cmd;
+    struct nvmeh_ctx ctx;
+    struct nvmeh_cmd_status status;
+
+    ctx.completed = 0;
+    status.status = 0;
+    status.ctx = &ctx;
+
+    cmd.opcode = NVME_ADM_CMD_IDENTIFY;
+    cmd.prp1 = (uint64_t) buf;
+    cmd.cns = NVME_CNS_NS;
+    cmd.nsid = nsid;
+
+    if (oxf_host_submit_admin ((struct nvme_cmd *) &cmd,
+					    nvmeh_identify_cb, &status)) {
+	return -1;
+    }
+
+    while (!ctx.completed) {
+	usleep (100);
+    }
+
+    return status.status;
 }
 
 static int nvmeh_rw (uint8_t *buf, uint64_t size, uint64_t slba,
