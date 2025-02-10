@@ -4,21 +4,24 @@ OX is (I) a computational storage solution for high-performance applications, (I
 
 ```
 RELEASE
-OX 2.6 is released. This version of OX contains the full-fledged FTL OX-Block. The FTL maintains
-a 4KB-granularity mapping table, implements garbage collection, and performs write-ahead logging,
-checkpoint, and recovery. OX 2.6 also comes with our NVMe over Fabrics implementation (using TCP sockets),
-future versions are expected with RDMA/Infiniband support. The last new feature is computational
-storage support, OX provides a set of libraries and interfaces for offloading applications to storage
-devices running OX.
-OX 2.6 runs in the DFC, other ARM platforms (Broadcom Stingray), and any x86 machines.
+
+OX 2.7: This release introduces a new media manager (File Backend), enabling the use of files to simulate
+flash memory with up to 4 TiB of storage. Additionally, OX 2.7 now supports a FUSE-based file system,
+allowing OX media to be mounted as a standard file system. We've also fixed several bugs to enhance
+stability and performance :)
 
 OLD RELEASES
-OX 1.4.0 is released. The main feature is supporting pblk target (host FTL) by enabling 
+OX 2.6: This release introduces the fully featured FTL OX-Block, which includes a 4KB-granularity
+mapping table, garbage collection, write-ahead logging, checkpointing, and recovery. Additionally,
+OX 2.6 debuts our NVMe over Fabrics implementation using TCP sockets, with future versions planned
+to support RDMA/Infiniband. Another key addition is computational storage support, providing libraries
+and interfaces for offloading applications directly to storage devices running OX. OX 2.6 is compatible
+with DFC, Broadcom Stingray (ARM platforms), and x86 machines.
+
+OX 1.4 : The main feature is supporting pblk target (host FTL) by enabling 
 sector-granularity reads. It allows file systems on top of the DFC namespace. It requires 
 the linux kernel 4.13 or higher. Please, check the 'pblk: Host-side FTL setup' section.
 ```
-**Website:**  
-  COMING SOON...
 
 **Documentation:**  
 - https://github.com/DFC-OpenSource/ox-ctrl/wiki  
@@ -45,13 +48,16 @@ Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctr
 
 ```
  Possible Ubuntu packages:
- $ sudo apt-get install cmake libreadline6 libreadline6-dev
+ $ sudo apt-get install cmake libreadline6 libreadline6-dev libfuse-dev
  
  Install OX:
  $ git clone https://github.com/DFC-OpenSource/ox-ctrl.git
  $ cd ox-ctrl
  $ mkdir build
  $ cd build
+ $ mkdir disk
+ $ cmake -DFILE_FOLDER=./disk -DFILE_GB=<256, 512, 1024, 1536, 2048, 3072, 4096> ..    (If you are using File backend, set -DFILE_GB accordingly)
+ OR
  $ cmake -DVOLT_GB=<4,8,16,32,64> ..   (If you are using DRAM backend, set -DVOLT_GB accordingly)
  $ sudo make install
 ```
@@ -62,6 +68,8 @@ Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctr
  - Open 2 terminals.
  First terminal:
    $ cd <ox-ctrl>/build
+   $ ./ox-ctrl-nvme-filebe start
+   OR
    $ ./ox-ctrl-nvme-volt start
    Wait until you see OX startup
    Try some commands:
@@ -70,8 +78,6 @@ Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctr
     > show io
     > show gc
     > show cp
-    > debug on
-    > debug off
     > show mq status
     > exit (if you want to close OX)
  Second terminal:
@@ -79,23 +85,22 @@ Detailed information can be found here (https://github.com/DFC-OpenSource/ox-ctr
    Write something to your OX device:
      (Here you are writing BLKS 4K-blocks starting from block SLBA)
      $ ./ox-test-nvme-thput-w <SLBA> <BLKS>
-     (Here you are writing 10000 4K-blocks starting from block 1)
-     $ ./ox-test-nvme-thput-w 1 10000
+     (Here you are writing 1000000 4K-blocks starting from block 1)
+     $ ./ox-test-nvme-thput-w 1 1000000
    Read what you wrote:
-     $ ./ox-test-nvme-thput-r 1 10000
+     $ ./ox-test-nvme-thput-r 1 1000000
 
 You can type 'show io' in the first terminal while running the tests for runtime statistics.
    
 ```
 
-# Application integration
- - SOON
-
-
 # Internal components:
 
-```   - Open-channel SSD v1.2 media manager
+```
+      - Open-channel SSD v1.2 media manager
       - DRAM media manager (VOLT)
+      - File BE Media Manager (FILE-BE)
+      - FUSE File System support
       - LightNVM FTL support for raw open-channel SSD access
       - OX-App Application-specific FTL Framework
       - OX-Block full-fledged FTL (Block device)
